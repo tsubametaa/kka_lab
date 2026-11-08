@@ -1,0 +1,9 @@
+numpy
+transformers==4.57.1
+peft==0.17.1
+accelerate==1.10.1
+bitsandbytes==0.48.1
+astrapy==2.0.1
+python-dotenv==1.1.1
+fastapi==0.116.1
+uvicorn[standard]==0.35.0

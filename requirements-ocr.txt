@@ -1,0 +1,7 @@
+pymupdf>=1.24.0
+Pillow>=10.0.0
+einops>=0.8.0
+addict>=2.4.0
+easydict>=1.13
+python-multipart>=0.0.9
+

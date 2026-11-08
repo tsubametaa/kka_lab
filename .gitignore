@@ -1,0 +1,40 @@
+# Environment & local credentials
+.env
+.env.*
+!.env.example
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Python bytecode & pycache (all levels)
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+
+# Testing & linter caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Experiment outputs, models, & logs
+adapters/
+logs/
+model_record.json
+ocr_model_record.json
+data/uploads/
+exports/
+*.lock.txt
+
+# Local databases
+*.sqlite3
+data/*.sqlite3
+
+# Research documents & drafts
+docs/
+*.docx
+*.pdf
