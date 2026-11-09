@@ -38,3 +38,8 @@ data/*.sqlite3
 docs/
 *.docx
 *.pdf
+
+# Dataset generation scripts
+scripts/build_lora_dataset.py
+scripts/dataset_builder/
+
