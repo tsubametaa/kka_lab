@@ -20,7 +20,10 @@ except ImportError:
 
 from app.core.config import load_record
 from app.features.chat.prompts import (
+    DEFAULT_MAX_NEW_TOKENS,
     DEFAULT_MAX_PROMPT_TOKENS,
+    DEFAULT_SAMPLING_CONFIG,
+    build_generation_kwargs,
     fit_messages_to_budget,
     make_system,
     resolve_max_prompt_tokens,
@@ -64,7 +67,22 @@ class LocalAssistant:
         self.model = model
         self.gpu_lock = threading.RLock()
         self.max_history_turns = 4
-        self.max_new_tokens = int(os.getenv('MAX_NEW_TOKENS', '512'))
+        self.max_new_tokens = int(os.getenv('MAX_NEW_TOKENS', str(DEFAULT_MAX_NEW_TOKENS)))
+        self.do_sample = os.getenv(
+            'GEN_DO_SAMPLE', str(DEFAULT_SAMPLING_CONFIG['do_sample'])
+        ).strip().lower() not in ('0', 'false', 'no')
+        self.temperature = float(
+            os.getenv('GEN_TEMPERATURE', str(DEFAULT_SAMPLING_CONFIG['temperature']))
+        )
+        self.top_p = float(
+            os.getenv('GEN_TOP_P', str(DEFAULT_SAMPLING_CONFIG['top_p']))
+        )
+        self.min_p = float(
+            os.getenv('GEN_MIN_P', str(DEFAULT_SAMPLING_CONFIG['min_p']))
+        )
+        self.repetition_penalty = float(
+            os.getenv('GEN_REPETITION_PENALTY', str(DEFAULT_SAMPLING_CONFIG['repetition_penalty']))
+        )
         configured_prompt = int(os.getenv('MAX_PROMPT_TOKENS', '0') or '0')
         self.max_prompt_tokens = resolve_max_prompt_tokens(
             model, max_new_tokens=self.max_new_tokens, configured=configured_prompt
@@ -96,13 +114,17 @@ class LocalAssistant:
             input_len = inputs['input_ids'].shape[1]
             inputs = {key: value.to('cuda:0') for key, value in inputs.items()}
             try:
+                gen_kwargs = build_generation_kwargs(
+                    self.tokenizer,
+                    max_new_tokens=self.max_new_tokens,
+                    do_sample=self.do_sample,
+                    temperature=self.temperature,
+                    top_p=self.top_p,
+                    min_p=self.min_p,
+                    repetition_penalty=self.repetition_penalty,
+                )
                 with self.gpu_lock, torch.inference_mode():
-                    output = self.model.generate(
-                        **inputs, max_new_tokens=self.max_new_tokens, do_sample=False,
-                        temperature=None, top_p=None, top_k=None,
-                        pad_token_id=self.tokenizer.pad_token_id,
-                        eos_token_id=self.tokenizer.eos_token_id,
-                    )
+                    output = self.model.generate(**inputs, **gen_kwargs)
                 break
             except RuntimeError as exc:
                 del inputs

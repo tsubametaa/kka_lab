@@ -8,6 +8,9 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
+
+from app.core.security import verify_internal_api_key as _verify_internal_api_key
 
 from app.features.ocr import (
     DocumentValidationError,
@@ -49,20 +52,18 @@ _UPLOAD_OPENAPI = {
     },
 }
 
-def _verify_internal_api_key(request: Request):
-    expected = os.getenv('AI_INTERNAL_SECRET', '').strip()
-    if not expected:
-        return
-    provided = request.headers.get('x-api-key', '')
-    if not secrets.compare_digest(provided, expected):
-        raise HTTPException(status_code=403, detail='Akses layanan AI ditolak (X-API-Key tidak valid).')
-
 def _is_admin_request(request: Request):
     admin_secret = os.getenv('RAG_ADMIN_SECRET', '').strip()
     if not admin_secret:
         return False
     provided = request.headers.get('x-admin-key', '')
     return secrets.compare_digest(provided, admin_secret)
+
+def _stage_upload_file(staging_dir: Path, staged_file: Path, raw_bytes: bytes):
+    """Tulis berkas unggahan ke direktori staging (sinkron, dipanggil via threadpool)."""
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    staged_file.write_bytes(raw_bytes)
+
 
 def run_ingestion_pipeline(store, *, job_id, doc_id, file_path, staging_dir,
                            user_id, filename, source_title, topic, scope, tokenizer=None):
@@ -152,20 +153,24 @@ async def upload_rag_document(request: Request, background_tasks: BackgroundTask
     doc_id = f'doc_{uuid.uuid4().hex[:16]}'
     upload_root = Path(os.getenv('OCR_UPLOAD_DIR', 'data/uploads'))
     staging_dir = upload_root / job_id
-    staging_dir.mkdir(parents=True, exist_ok=True)
     staged_file = staging_dir / clean_name
-    staged_file.write_bytes(raw_bytes)
+    await run_in_threadpool(_stage_upload_file, staging_dir, staged_file, raw_bytes)
 
     store = request.app.state.store
-    job = store.create_ingestion_job(
-        job_id=job_id,
-        doc_id=doc_id,
-        user_id=user_id,
-        filename=clean_name,
-        source_title=source_title,
-        topic=topic,
-        scope=scope,
-    )
+    try:
+        job = await run_in_threadpool(
+            store.create_ingestion_job,
+            job_id=job_id,
+            doc_id=doc_id,
+            user_id=user_id,
+            filename=clean_name,
+            source_title=source_title,
+            topic=topic,
+            scope=scope,
+        )
+    except Exception:
+        await run_in_threadpool(shutil.rmtree, staging_dir, ignore_errors=True)
+        raise
 
     assistant = getattr(request.app.state, 'assistant', None)
     tokenizer = getattr(assistant, 'tokenizer', None)

@@ -18,6 +18,8 @@ from app.features.rag.chunker import (
 from app.features.rag.context import (
     SHORT_QUESTION_WORDS,
     build_context,
+    filter_relevant_history,
+    is_follow_up_question,
     resolve_query_topic,
     retrieval_query,
 )
@@ -46,9 +48,11 @@ __all__ = [
     'delete_document_chunks',
     'delete_user_rag_documents',
     'evaluate_kka_gate',
+    'filter_relevant_history',
     'get_astra_collection',
     'ingest_chunks',
     'is_auto_learn_enabled',
+    'is_follow_up_question',
     'match_kka_domain_terms',
     'maybe_auto_learn_from_exchange',
     'parse_and_validate_distilled_note',

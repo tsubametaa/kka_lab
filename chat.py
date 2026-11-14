@@ -8,7 +8,10 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft import PeftModel
 from app.core import load_record
 from app.features.chat import (
+    DEFAULT_MAX_NEW_TOKENS,
     DEFAULT_MAX_PROMPT_TOKENS,
+    DEFAULT_SAMPLING_CONFIG,
+    build_generation_kwargs,
     fit_messages_to_budget,
     make_system,
     resolve_max_prompt_tokens,
@@ -40,7 +43,13 @@ parser.add_argument('--rag-per-sesi', action='store_true',
                     help='Ambil sumber sekali di awal sesi saja (protokol awal tutorial)')
 parser.add_argument('--max-prompt-tokens', type=int, default=0,
                     help='Batas maksimum token prompt (default: 0 = otomatis maksimum model ~32K token)')
-parser.add_argument('--max-new-tokens', type=int, default=512)
+parser.add_argument('--max-new-tokens', type=int, default=DEFAULT_MAX_NEW_TOKENS)
+parser.add_argument('--greedy', action='store_true',
+                    help='Gunakan greedy decoding (do_sample=False) untuk pengujian deterministik')
+parser.add_argument('--temperature', type=float, default=DEFAULT_SAMPLING_CONFIG['temperature'])
+parser.add_argument('--top-p', type=float, default=DEFAULT_SAMPLING_CONFIG['top_p'])
+parser.add_argument('--min-p', type=float, default=DEFAULT_SAMPLING_CONFIG['min_p'])
+parser.add_argument('--repetition-penalty', type=float, default=DEFAULT_SAMPLING_CONFIG['repetition_penalty'])
 parser.add_argument('--max-history', type=int, default=4,
                     help='Jumlah giliran tanya-jawab terakhir yang diingat')
 parser.add_argument('--debug', action='store_true',
@@ -48,6 +57,12 @@ parser.add_argument('--debug', action='store_true',
 parser.add_argument('--tanpa-sumber', action='store_true', help='Sembunyikan baris sumber')
 parser.add_argument('--persona', default='',
                     help='Gaya jawaban pilihan siswa, mis. "tsundere, bilang Hmph kalau tidak setuju"')
+parser.add_argument('--session', default='',
+                    help='ID sesi percakapan untuk melanjutkan chat di Astra DB (jika kosong, buat sesi baru)')
+parser.add_argument('--user-id', default='siswa_01',
+                    help='ID user untuk riwayat chat di Astra DB (default: siswa_01)')
+parser.add_argument('--no-astra-history', action='store_true',
+                    help='Jangan simpan riwayat chat ke Astra DB (hanya memori lokal sementara)')
 args = parser.parse_args()
 try:
     persona = clean_persona(args.persona)
@@ -103,6 +118,28 @@ def format_similarity(value):
 
 history, context, sources, topic = [], '', [], ''
 session_rag_loaded = False
+
+# Inisialisasi penyimpanan riwayat obrolan di Astra DB
+astra_store = None
+session_id = args.session.strip() or None
+if not args.no_astra_history:
+    try:
+        from app.features.memory.astra_store import AstraChatStore
+        astra_store = AstraChatStore()
+        if session_id:
+            loaded_history = astra_store.history(session_id, limit=args.max_history)
+            if loaded_history:
+                history.extend(loaded_history)
+                print(f'Melanjutkan sesi Astra DB: {session_id} ({len(loaded_history)//2} tanya-jawab dimuat)')
+            else:
+                print(f'Sesi Astra DB [{session_id}] belum memiliki riwayat obrolan.')
+        else:
+            session_id = astra_store.create_session(args.user_id)
+            print(f'Sesi chat Astra DB aktif: {session_id}')
+    except Exception as exc:
+        if args.debug:
+            print(f'[debug] Astra DB chat history tidak aktif: {exc}')
+
 print('Siap. /baru = sesi baru; /keluar = berhenti.')
 print('/persona <gaya> = atur gaya jawaban; /persona = lihat; /persona hapus = kembali normal.')
 if persona:
@@ -118,7 +155,11 @@ while True:
     if question == '/baru':
         history, context, sources, topic = [], '', [], ''
         session_rag_loaded = False
-        print('Sesi baru dimulai.')
+        if astra_store:
+            session_id = astra_store.create_session(args.user_id)
+            print(f'Sesi baru dimulai (ID Sesi Astra DB: {session_id}).')
+        else:
+            print('Sesi baru dimulai.')
         continue
     if question == '/persona' or question.startswith('/persona '):
         value = question[len('/persona'):].strip()
@@ -178,13 +219,17 @@ while True:
             input_len = inputs['input_ids'].shape[1]
             inputs = {k: v.to('cuda:0') for k, v in inputs.items()}
             try:
+                gen_kwargs = build_generation_kwargs(
+                    tokenizer,
+                    max_new_tokens=args.max_new_tokens,
+                    do_sample=not args.greedy,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    min_p=args.min_p,
+                    repetition_penalty=args.repetition_penalty,
+                )
                 with torch.inference_mode():
-                    output = model.generate(
-                        **inputs, max_new_tokens=args.max_new_tokens, do_sample=False,
-                        temperature=None, top_p=None, top_k=None,
-                        pad_token_id=tokenizer.pad_token_id,
-                        eos_token_id=tokenizer.eos_token_id,
-                    )
+                    output = model.generate(**inputs, **gen_kwargs)
                 break
             except RuntimeError as exc:
                 del inputs
@@ -221,6 +266,22 @@ while True:
         {'role': 'user', 'content': question},
         {'role': 'assistant', 'content': answer},
     ])
+    if astra_store and session_id:
+        try:
+            astra_store.save_exchange(
+                user_id=args.user_id,
+                session_id=session_id,
+                question=question,
+                answer=answer,
+                mode=args.mode,
+                sources=sources,
+                training_consent=False,
+            )
+            if args.debug:
+                print(f'[debug] Riwayat chat tersimpan di Astra DB (Sesi: {session_id})')
+        except Exception as exc:
+            if args.debug:
+                print(f'[debug] Gagal menyimpan chat ke Astra DB: {exc}')
     if args.log:
         path = Path(args.log)
         path.parent.mkdir(parents=True, exist_ok=True)

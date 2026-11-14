@@ -10,18 +10,15 @@ from app.features.language.locales import (
     VAGUE_REFERENCES,
 )
 
-
 def normalize_question(question):
     normalized = unicodedata.normalize('NFKC', question).casefold()
     return ' '.join(re.findall(r'\w+', normalized, flags=re.UNICODE))
-
 
 def _knowledge_terms(text):
     return {
         word for word in normalize_question(text).split()
         if len(word) >= 2 and word not in STOP_WORDS
     }
-
 
 def training_quality(question, answer, consent):
     """Return (eligible, reason); eligibility still requires human review."""

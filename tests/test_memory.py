@@ -1,15 +1,11 @@
-import tempfile
 import unittest
 
 from app.features.memory import ChatStore, normalize_question, training_quality
+from tests.astra_fake import InMemoryAstraCollection
 
 class MemoryTests(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.store = ChatStore(self.temp_dir.name + '/memory.sqlite3')
-
-    def tearDown(self):
-        self.temp_dir.cleanup()
+        self.store = ChatStore(collection=InMemoryAstraCollection())
 
     def test_normalization_ignores_case_and_punctuation(self):
         self.assertEqual(

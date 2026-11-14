@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.features.memory import ChatStore
+from tests.astra_fake import InMemoryAstraCollection
 from app.features.ocr import (
     DocumentValidationError,
     PageMarkdown,
@@ -134,7 +135,7 @@ def _make_request(app_state, headers=None):
 class OcrAndScopedRagTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.store = ChatStore(Path(self.temp_dir.name) / 'memory.sqlite3')
+        self.store = ChatStore(collection=InMemoryAstraCollection())
         self.env_patch = patch.dict(os.environ, {
             'ASTRA_DB_API_ENDPOINT': 'https://example-astra.apps.astra.datastax.com',
             'ASTRA_DB_APPLICATION_TOKEN': 'AstraCS:test_token',

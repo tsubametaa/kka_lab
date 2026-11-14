@@ -9,6 +9,53 @@ POLICIES = id_locale.POLICIES
 
 MODEL_MAX_CONTEXT_TOKENS = 32768
 DEFAULT_MAX_PROMPT_TOKENS = MODEL_MAX_CONTEXT_TOKENS - 512 - 32  # 32224
+DEFAULT_MAX_NEW_TOKENS = 768
+DEFAULT_SAMPLING_CONFIG = {
+    'do_sample': True,
+    'temperature': 0.45,
+    'top_p': 0.9,
+    'min_p': 0.05,
+    'repetition_penalty': 1.08,
+}
+
+def build_generation_kwargs(
+    tokenizer,
+    *,
+    max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
+    do_sample=DEFAULT_SAMPLING_CONFIG['do_sample'],
+    temperature=DEFAULT_SAMPLING_CONFIG['temperature'],
+    top_p=DEFAULT_SAMPLING_CONFIG['top_p'],
+    min_p=DEFAULT_SAMPLING_CONFIG['min_p'],
+    repetition_penalty=DEFAULT_SAMPLING_CONFIG['repetition_penalty'],
+):
+    """Build Hugging Face generate() kwargs with safe natural sampling defaults."""
+    kwargs = {
+        'max_new_tokens': max(1, int(max_new_tokens)),
+        'pad_token_id': tokenizer.pad_token_id,
+        'eos_token_id': tokenizer.eos_token_id,
+    }
+    if do_sample:
+        temp = float(temperature)
+        if temp <= 0:
+            raise ValueError('temperature harus lebih besar dari 0 saat do_sample=True.')
+        kwargs.update({
+            'do_sample': True,
+            'temperature': temp,
+            'top_p': float(top_p),
+            'min_p': float(min_p),
+            'repetition_penalty': float(repetition_penalty),
+        })
+    else:
+        kwargs.update({
+            'do_sample': False,
+            'temperature': None,
+            'top_p': None,
+            'top_k': None,
+        })
+        if repetition_penalty and float(repetition_penalty) != 1.0:
+            kwargs['repetition_penalty'] = float(repetition_penalty)
+    return kwargs
+
 
 def resolve_max_prompt_tokens(model=None, max_new_tokens=512, configured=None):
     """Return the highest safe prompt token limit supported by the model architecture."""

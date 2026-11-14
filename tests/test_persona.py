@@ -79,11 +79,8 @@ class PersonaPromptTests(unittest.TestCase):
 
 class PersonaStoreTests(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.store = ChatStore(self.temp_dir.name + '/memory.sqlite3')
-
-    def tearDown(self):
-        self.temp_dir.cleanup()
+        from tests.astra_fake import InMemoryAstraCollection
+        self.store = ChatStore(collection=InMemoryAstraCollection())
 
     def test_save_get_update_delete_and_isolation(self):
         self.assertEqual(self.store.get_persona('student-1'), '')

@@ -10,9 +10,9 @@ try:
 except ImportError:
     def load_dotenv():
         return False
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Depends, FastAPI
 
+from app.core.security import verify_internal_api_key
 from app.features.chat.assistant import LocalAssistant
 from app.features.chat.router import ChatRequest, router as chat_router
 from app.features.memory.router import KnowledgeRequest, router as memory_router
@@ -28,36 +28,21 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.store = ChatStore(os.getenv('CHAT_DB_PATH', 'data/chat_memory.sqlite3'))
+    app.state.store = ChatStore()
     app.state.assistant = LocalAssistant()
     yield
 
 app = FastAPI(title='Kyara AI', lifespan=lifespan)
 
-origins = [
-    origin.strip()
-    for origin in os.getenv(
-        'FRONTEND_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173'
-    ).split(',')
-    if origin.strip()
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=False,
-    allow_methods=['GET', 'POST', 'PUT', 'DELETE'],
-    allow_headers=['Content-Type', 'X-API-Key', 'X-Admin-Key'],
-)
-
 @app.get('/api/health')
 def health():
     return {'status': 'ok'}
 
-app.include_router(chat_router)
-app.include_router(memory_router)
-app.include_router(persona_router)
-app.include_router(rag_router)
+internal_auth = [Depends(verify_internal_api_key)]
+app.include_router(chat_router, dependencies=internal_auth)
+app.include_router(memory_router, dependencies=internal_auth)
+app.include_router(persona_router, dependencies=internal_auth)
+app.include_router(rag_router, dependencies=internal_auth)
 
 __all__ = [
     'app',

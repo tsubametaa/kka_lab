@@ -12,7 +12,11 @@ from app.features.rag.auto_learner import (
     is_auto_learn_enabled,
     maybe_auto_learn_from_exchange,
 )
-from app.features.rag.context import build_context, retrieval_query
+from app.features.rag.context import (
+    build_context,
+    filter_relevant_history,
+    retrieval_query,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=['chat'])
@@ -23,6 +27,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
     mode: str = 'umum'
     consent_to_training: bool = False
+    reset_context: bool = False
 
 @router.post('/api/chat')
 def chat(payload: ChatRequest, request: Request, background_tasks: BackgroundTasks):
@@ -44,7 +49,8 @@ def chat(payload: ChatRequest, request: Request, background_tasks: BackgroundTas
         payload.user_id, question, mode=payload.mode
     )
     history = store.history(session_id)
-    lang = detect_language(question, history)
+    active_history = [] if payload.reset_context else filter_relevant_history(question, history)
+    lang = detect_language(question, active_history)
     memories = store.find_relevant_knowledge(payload.user_id, question)
     if repeated:
         memories.insert(0, {'question': question, 'answer': repeated['answer']})
@@ -56,7 +62,7 @@ def chat(payload: ChatRequest, request: Request, background_tasks: BackgroundTas
     )
     try:
         from app.features.rag.retriever import retrieve
-        previous_topic = history[-2]['content'] if len(history) >= 2 else ''
+        previous_topic = active_history[-2]['content'] if len(active_history) >= 2 else ''
         query = retrieval_query(question, previous_topic)
         lock = getattr(assistant, 'gpu_lock', None) or nullcontext()
         with lock:
@@ -67,7 +73,7 @@ def chat(payload: ChatRequest, request: Request, background_tasks: BackgroundTas
         context, sources = build_context(docs, assistant.tokenizer)
         persona = store.get_persona(payload.user_id)
         answer = assistant.answer(
-            question, payload.mode, history, context, memory, lang=lang,
+            question, payload.mode, active_history, context, memory, lang=lang,
             persona=persona,
         )
     except ValueError as error:

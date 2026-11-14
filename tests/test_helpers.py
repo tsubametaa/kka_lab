@@ -1,7 +1,10 @@
 import unittest
 from app.features.chat import (
+    DEFAULT_MAX_NEW_TOKENS,
     DEFAULT_MAX_PROMPT_TOKENS,
+    DEFAULT_SAMPLING_CONFIG,
     MODEL_MAX_CONTEXT_TOKENS,
+    build_generation_kwargs,
     count_prompt_tokens,
     fit_messages_to_budget,
     make_system,
@@ -13,6 +16,8 @@ from app.features.dataset import (
     validate_rows,
 )
 from app.features.rag import (
+    filter_relevant_history,
+    is_follow_up_question,
     resolve_query_topic,
     retrieval_query,
 )
@@ -47,41 +52,121 @@ class Helpers(unittest.TestCase):
             encode_target(tok, messages, 5)
 
     def test_validation_and_modes(self):
-        base = {'group_id': 'a', 'context': '[S1] materi',
-                'messages': [{'role': 'user', 'content': 'apa'},
-                             {'role': 'assistant', 'content':
-                              '1. Periksa materi. 2. Bandingkan hasil karena tujuan berbeda. '
-                              'Menurutmu apa alasannya?'}]}
+        base = {
+            'group_id': 'a',
+            'context': '[S1] materi',
+            'messages': [
+                {'role': 'user', 'content': 'apa itu algoritma?'},
+                {
+                    'role': 'assistant',
+                    'content': (
+                        'Algoritma itu urutan langkah logis untuk menyelesaikan masalah karena komputer butuh instruksi jelas. '
+                        'Misalnya seperti resep memasak nasi goreng yang berurutan dari menumis bumbu sampai matang. '
+                        'Menurutmu apa yang terjadi jika langkahnya dibalik?'
+                    ),
+                },
+            ],
+        }
         rows = [dict(base, id=mode, mode=mode) for mode in ('umum', 'terstruktur')]
         validate_rows(rows)
+
+        stiff_rows = [
+            dict(
+                row,
+                messages=[
+                    row['messages'][0],
+                    {
+                        'role': 'assistant',
+                        'content': (
+                            'Pahami bahwa algoritma itu penting karena komputer butuh aturan. '
+                            'Misalnya resep masakan yang berurutan. Menurutmu kenapa urutan itu penting?'
+                        ),
+                    },
+                ],
+            )
+            for row in rows
+        ]
+        with self.assertRaisesRegex(ValueError, 'pembuka perintah kaku'):
+            validate_rows(stiff_rows)
+
         raw_answer_rows = [
             dict(row, messages=[row['messages'][0], {'role': 'assistant', 'content': 'Jawab langsung.'}])
             for row in rows
         ]
-        with self.assertRaisesRegex(ValueError, 'minimal dua langkah'):
+        with self.assertRaisesRegex(ValueError, 'minimal dua kalimat'):
             validate_rows(raw_answer_rows)
+
         no_reason_rows = [
-            dict(row, messages=[row['messages'][0], {'role': 'assistant',
-                 'content': '1. Amati contoh. 2. Bandingkan hasil. Menurutmu apa bedanya?'}])
+            dict(
+                row,
+                messages=[
+                    row['messages'][0],
+                    {
+                        'role': 'assistant',
+                        'content': (
+                            'Algoritma merupakan urutan langkah kerja suatu sistem program di komputer sehari-hari. '
+                            'Misalnya seperti daftar menu makanan di kantin sekolah. Menurutmu apa bedanya?'
+                        ),
+                    },
+                ],
+            )
             for row in rows
         ]
         with self.assertRaisesRegex(ValueError, 'menjelaskan alasan'):
             validate_rows(no_reason_rows)
+
+        no_example_umum = [
+            dict(
+                rows[0],
+                messages=[
+                    rows[0]['messages'][0],
+                    {
+                        'role': 'assistant',
+                        'content': (
+                            'Algoritma merupakan urutan langkah terstruktur untuk menyelesaikan suatu tugas komputasi. '
+                            'Hal ini penting karena mesin hanya mengeksekusi instruksi secara harfiah. Menurutmu apa manfaatnya?'
+                        ),
+                    },
+                ],
+            ),
+            rows[1],
+        ]
+        with self.assertRaisesRegex(ValueError, 'contoh konkret'):
+            validate_rows(no_example_umum)
+
         no_prompt_rows = [
-            dict(row, messages=[row['messages'][0], {'role': 'assistant',
-                 'content': '1. Amati contoh. 2. Bandingkan hasil karena tujuannya berbeda.'}])
+            dict(
+                row,
+                messages=[
+                    row['messages'][0],
+                    {
+                        'role': 'assistant',
+                        'content': (
+                            'Algoritma adalah urutan langkah terstruktur karena komputer butuh instruksi jelas saat bekerja. '
+                            'Misalnya seperti resep membuat teh manis yang rapi dari awal sampai akhir.'
+                        ),
+                    },
+                ],
+            )
             for row in rows
         ]
         with self.assertRaisesRegex(ValueError, 'pemantik berpikir'):
             validate_rows(no_prompt_rows)
+
         with self.assertRaises(ValueError):
             validate_rows(rows + [rows[0]])
+
         general = make_system('umum', 'x')
         structured = make_system('terstruktur', 'x')
         self.assertNotEqual(general, structured)
         self.assertIn('Jangan memberikan jawaban akhir saja', general)
-        self.assertIn('2-4 langkah', general)
+        self.assertIn('200-320 kata', general)
+        self.assertIn('DILARANG membuka jawaban dengan kalimat perintah kaku', general)
+        self.assertIn('contoh konkret', general)
+        self.assertIn('simulasi kasus sederhana', general)
+        self.assertIn('SMA/SMK kelas X', general)
         self.assertIn('Jangan berikan solusi lengkap pada giliran awal', structured)
+
         personal = make_system('umum', 'x', '[M1] catatan')
         self.assertIn('belum terverifikasi', personal)
         self.assertIn('[M1] catatan', personal)
@@ -94,12 +179,38 @@ class Helpers(unittest.TestCase):
         self.assertNotEqual(general_en, structured_en)
         self.assertIn('GENERAL MODE', general_en)
         self.assertIn('STRUCTURED MODE', structured_en)
+        self.assertIn('200-320 words', general_en)
+        self.assertIn('case simulation', general_en)
+        self.assertIn('Grade 10', general_en)
         self.assertIn('SOURCE CONTEXT', general_en)
         self.assertIn('PERSONAL MEMORY', general_en)
         self.assertIn('MANDATORY LANGUAGE RULE', general_en)
         self.assertIn('Never answer in Indonesian.', general_en)
         with self.assertRaises(ValueError):
             make_system('umum', 'x', lang='fr')
+
+    def test_build_generation_kwargs_sampling_and_greedy(self):
+        class DummyTokenizer:
+            pad_token_id = 0
+            eos_token_id = 2
+
+        tok = DummyTokenizer()
+        sampled = build_generation_kwargs(tok)
+        self.assertTrue(sampled['do_sample'])
+        self.assertEqual(sampled['max_new_tokens'], DEFAULT_MAX_NEW_TOKENS)
+        self.assertEqual(sampled['temperature'], DEFAULT_SAMPLING_CONFIG['temperature'])
+        self.assertEqual(sampled['top_p'], DEFAULT_SAMPLING_CONFIG['top_p'])
+        self.assertEqual(sampled['min_p'], DEFAULT_SAMPLING_CONFIG['min_p'])
+        self.assertEqual(sampled['repetition_penalty'], DEFAULT_SAMPLING_CONFIG['repetition_penalty'])
+
+        greedy = build_generation_kwargs(tok, do_sample=False, repetition_penalty=1.0)
+        self.assertFalse(greedy['do_sample'])
+        self.assertIsNone(greedy['temperature'])
+        self.assertIsNone(greedy['top_p'])
+        self.assertNotIn('min_p', greedy)
+
+        with self.assertRaises(ValueError):
+            build_generation_kwargs(tok, do_sample=True, temperature=0.0)
 
     def test_retrieval_query_and_topic_resolution(self):
         # Short question (< 6 words) with topic should merge
@@ -119,6 +230,42 @@ class Helpers(unittest.TestCase):
 
         # Empty topic should not merge
         self.assertEqual(retrieval_query('apa itu?', ''), 'apa itu?')
+
+        # Short standalone new topic (< 6 words) should NOT merge with unrelated previous topic
+        self.assertFalse(is_follow_up_question('Apa itu SQL injection?', 'Jelaskan algoritma K-Means'))
+        self.assertEqual(
+            retrieval_query('Jelaskan SQL injection dong', 'Apa itu algoritma K-Means?'),
+            'Jelaskan SQL injection dong',
+        )
+        self.assertEqual(
+            retrieval_query('What is Docker?', 'Explain overfitting in ML'),
+            'What is Docker?',
+        )
+        # True follow-up (< 6 words) still merges
+        self.assertTrue(is_follow_up_question('How does it work?', 'Explain Docker'))
+        self.assertEqual(
+            retrieval_query('Contohnya di Python?', 'Apa itu algoritma K-Means?'),
+            'Apa itu algoritma K-Means? Contohnya di Python?',
+        )
+
+    def test_filter_relevant_history_drops_stale_topic_on_switch(self):
+        history = [
+            {'role': 'user', 'content': 'Apa itu algoritma K-Means?'},
+            {'role': 'assistant', 'content': 'K-Means mengelompokkan data ke dalam klaster berdasarkan jarak centroid.'},
+            {'role': 'user', 'content': 'Apa itu SQL injection?'},
+            {'role': 'assistant', 'content': 'SQL injection adalah celah keamanan ketika input pengguna disisipkan ke query basis data.'},
+        ]
+        # Switch from K-Means straight to Docker -> drops both old topics cleanly
+        self.assertEqual(filter_relevant_history('Apa itu Docker?', history), [])
+
+        # Follow-up on SQL injection keeps ONLY SQL injection turn, excludes earlier K-Means turn
+        active = filter_relevant_history('Contohnya bagaimana cara mencegahnya?', history)
+        self.assertEqual(len(active), 2)
+        self.assertEqual(active[0]['content'], 'Apa itu SQL injection?')
+
+        # Same-topic follow-up keeps continuous related turns
+        related_only = filter_relevant_history('Kenapa centroid K-Means harus dihitung ulang?', history[:2])
+        self.assertEqual(len(related_only), 2)
 
     def test_fit_messages_to_budget_normal(self):
         tok = FakeTokenizer()

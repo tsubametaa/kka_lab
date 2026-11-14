@@ -100,19 +100,20 @@ python scripts/download_ocr_model.py
 
 Jika Anda belum memiliki adaptor LoRA atau ingin melatih ulang:
 
-1. Unggah dataset penelitian Anda ke `data/lora_dialogues.jsonl`.
-2. Buka notebook **`notebooks/Training_LoRA_CloudGPU.ipynb`** di JupyterLab, lalu jalankan sel 1 sampai 7 secara berurutan.
-   *(Atau jalankan langsung via terminal)*:
+1. Pastikan dataset penelitian (`data/lora/lora_train.jsonl` 600 baris, `data/lora/lora_val.jsonl` 130 baris, `data/lora/lora_test.jsonl` 120 baris) sudah tersedia dari `data/rag_data.jsonl` (atau bangun ulang dengan `python scripts/build_lora_dataset.py`).
+2. Buka notebook **`notebooks/Training_LoRA_CloudGPU.ipynb`** di JupyterLab, atau jalankan langsung via terminal *(default sudah memakai `target_modules='all-linear'`, `r=16`, `lora_alpha=32`, `lora_dropout=0.1`, `epochs=6`, dan `EarlyStoppingCallback`)*:
    ```bash
    python training/train_lora.py \
-     --data data/lora_dialogues.jsonl \
+     --data data/lora/lora_train.jsonl \
+     --val-data data/lora/lora_val.jsonl \
      --record model_record.json \
-     --out adapters/qwen-kka \
+     --out adapters/qwen-kka-lora \
+     --epochs 6 \
      --precision bf16 --batch-size 4 --grad-accum 2
    ```
 3. Setelah selesai, arahkan `.env` ke adaptor hasil training:
    ```env
-   MODEL_ADAPTER=adapters/qwen-kka/final
+   MODEL_ADAPTER=adapters/qwen-kka-lora/final
    ```
 4. **WAJIB BACKUP:** Unduh file ZIP di folder `exports/` ke laptop Anda (klik kanan di Jupyter $\rightarrow$ **Download**). Jika masa sewa habis dan menyewa GPU baru di kemudian hari, Anda **tidak perlu training ulang** — cukup unggah kembali folder adaptor tersebut.
 
@@ -153,15 +154,72 @@ curl http://127.0.0.1:8000/api/health
 
 ## 6. Menghubungkan Domain (Cloudflare Tunnel) ke Port `8000`
 
-Agar backend TypeScript/Go Anda bisa memanggil server GPU melalui HTTPS (`https://ai.domainanda.com`) tanpa pusing memikirkan IP dinamis atau port NAT:
+Agar backend TypeScript/Go Anda bisa memanggil server GPU melalui HTTPS (`https://ai.domainanda.com`) tanpa pusing memikirkan IP dinamis atau port NAT. Pilih salah satu cara di bawah ini:
 
-1. Buka dashboard **Cloudflare Zero Trust** $\rightarrow$ **Networks** $\rightarrow$ **Tunnels** $\rightarrow$ **Create a tunnel**.
-2. Salin perintah instalasi Linux (`cloudflared`) dari Cloudflare dan jalankan di Terminal GPU.
-3. Pada tab **Public Hostname** di Cloudflare, arahkan:
-   - **Subdomain:** `ai` (contoh: `ai.domainanda.com`)
-   - **Service Type:** `HTTP`
-   - **URL:** `localhost:8000`
-   *(Catatan: Port `8001` milik vLLM OCR **tidak perlu** diekspos keluar karena hanya dipanggil secara internal oleh FastAPI).*
+### Cara A — Menggunakan Domain Sendiri (Rekomendasi untuk Deploy & Backend TS/Go)
+
+**Prasyarat:** Anda sudah memiliki akun Cloudflare (gratis) dan 1 domain yang *nameserver*-nya aktif di Cloudflare.
+
+1. **Buat Tunnel di Dashboard Cloudflare:**
+   - Buka [one.dash.cloudflare.com](https://one.dash.cloudflare.com) (**Cloudflare Zero Trust**).
+   - Masuk ke menu **Networks** $\rightarrow$ **Tunnels** $\rightarrow$ klik **Create a tunnel**.
+   - Pilih tipe konektor **Cloudflared** $\rightarrow$ klik **Next**.
+   - Beri nama tunnel (contoh: `kka-gpu-server`) $\rightarrow$ klik **Save tunnel**.
+
+2. **Pasang `cloudflared` di Terminal GPU Vast.ai:**
+   *(Di halaman konfigurasi Cloudflare pilih **Debian / Ubuntu** dan **64-bit**, atau jalankan langsung perintah di bawah ini di Terminal GPU).*
+   ```bash
+   curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+   dpkg -i cloudflared.deb
+   rm -f cloudflared.deb
+   cloudflared --version
+   ```
+
+3. **Jalankan Tunnel di dalam `tmux` (Penting untuk Container Vast.ai):**
+   > **CATATAN VAST.AI:** Container Docker di Vast.ai umumnya tidak menjalankan `systemd`. Jangan gunakan `sudo cloudflared service install ...` karena sering gagal; jalankan langsung di `tmux` menggunakan **token** yang muncul di dashboard Cloudflare:
+   ```bash
+   tmux new -s tunnel
+   cloudflared tunnel run --token <PASTE_TOKEN_TUNNEL_ANDA_DI_SINI>
+   ```
+   - Tunggu sampai muncul log `Registered tunnel connection` (berarti koneksi dari GPU ke Cloudflare sudah tersambung).
+   - Tekan **`Ctrl+B`**, lepas, lalu tekan **`D`** untuk keluar dari layar `tmux` tanpa mematikan tunnel.
+
+4. **Arahkan Public Hostname di Dashboard Cloudflare:**
+   - Klik **Next** di halaman Cloudflare (atau buka tab **Public Hostname** $\rightarrow$ **Add a public hostname**), lalu isi:
+     - **Subdomain:** `ai` *(contoh hasil: `ai.domainanda.com`)*
+     - **Domain:** pilih domain Anda
+     - **Service Type:** `HTTP`
+     - **URL:** `127.0.0.1:8000` *(atau `localhost:8000`)*
+   - Klik **Save tunnel** / **Save hostname**.
+   - *(Catatan: Port `8001` milik vLLM OCR **tidak perlu** diekspos keluar karena hanya dipanggil secara internal oleh FastAPI).*
+
+5. **Tes dari Laptop / Terminal Lain:**
+   ```bash
+   curl https://ai.domainanda.com/api/health
+   # Output yang diharapkan: {"status":"ok"}
+   ```
+
+> **Jika suatu saat pindah mesin GPU Vast.ai:** Domain `https://ai.domainanda.com` tidak perlu diubah di backend TS/Go. Di mesin GPU yang baru, cukup pasang `cloudflared` lagi lalu jalankan `cloudflared tunnel run --token <TOKEN_YANG_SAMA>`.
+
+---
+
+### Cara B — Quick Tunnel Tanpa Domain (Hanya untuk Tes Sementara)
+
+Jika Anda belum memiliki domain di Cloudflare dan hanya ingin mengetes koneksi HTTPS cepat ke FastAPI port `8000`:
+
+1. Pasang `cloudflared` (langkah nomor 2 pada Cara A di atas).
+2. Jalankan di `tmux`:
+   ```bash
+   tmux new -s tunnel
+   cloudflared tunnel --url http://127.0.0.1:8000
+   ```
+3. Perhatikan output terminal hingga muncul URL sementara seperti:
+   `https://contoh-acak-kata.trycloudflare.com`
+4. Lepas layar `tmux` dengan **`Ctrl+B`** lalu **`D`**, dan tes dari laptop:
+   ```bash
+   curl https://contoh-acak-kata.trycloudflare.com/api/health
+   ```
+   *(Catatan: URL `trycloudflare.com` selalu berubah setiap kali proses tunnel dimatikan/restart, sehingga untuk pemakaian kelas/production tetap gunakan **Cara A**).*
 
 ---
 

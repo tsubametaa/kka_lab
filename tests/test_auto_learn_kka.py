@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from app.features.memory import ChatStore
+from tests.astra_fake import InMemoryAstraCollection
 from app.features.rag import (
     AUTO_LEARN_SOURCE_TITLE,
     evaluate_kka_gate,
@@ -83,8 +84,7 @@ def _make_request(store, headers=None):
 
 class AutoLearnKkaTests(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.TemporaryDirectory()
-        self.store = ChatStore(Path(self.temp_dir.name) / 'memory.sqlite3')
+        self.store = ChatStore(collection=InMemoryAstraCollection())
         self.env_patch = patch.dict(os.environ, {
             'ASTRA_DB_API_ENDPOINT': 'https://example-astra.apps.astra.datastax.com',
             'ASTRA_DB_APPLICATION_TOKEN': 'AstraCS:test_token',
@@ -95,7 +95,6 @@ class AutoLearnKkaTests(unittest.TestCase):
 
     def tearDown(self):
         self.env_patch.stop()
-        self.temp_dir.cleanup()
 
     def test_rejects_non_kka_topics_poisoning_uncertainty_and_duplicates(self):
         # 1. Pelajaran di luar KKA (mis. Sejarah / Biologi) -> ditolak

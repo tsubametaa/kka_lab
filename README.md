@@ -19,38 +19,72 @@ Belum dijalankan pada RTX 3050 Anda atau sesi Colab Anda.
 
 ## Struktur Proyek
 
-`	ext
+```text
 kka_lab/
+├── adapters/                      # Artefak checkpoint & bobot akhir LoRA hasil fine-tuning
+│   ├── qwen-kka/                  # Adaptor LoRA v1 (evaluasi, lock file, run manifest)
+│   └── qwen-kka-v2/               # Adaptor LoRA v2 (final checkpoint & metadata)
 ├── app/                           # Modul utama aplikasi (Layered by Feature)
-│   ├── core/                      # Foundational utilities (config, model record)
-│   ├── features/                  # Modul berbasis fitur domain
-│   │   ├── chat/                  # Interaksi percakapan, prompts pedagogis & inferensi GPU
-│   │   ├── rag/                   # Retrieval Astra DB, context builder & exceptions
-│   │   ├── memory/                # SQLite ChatStore & training quality gate
-│   │   ├── persona/               # Persona kustom siswa, sanitasi & guardrail
-│   │   ├── ocr/                   # Render halaman PDF & client Baidu Unlimited-OCR
+│   ├── core/                      # Fondasi konfigurasi Pydantic & model record pin
+│   │   ├── config.py              # Settings global (Astra DB, API keys, model paths)
+│   │   └── __init__.py            # Export core helper
+│   ├── features/                  # Modul domain independen berbasis fitur
+│   │   ├── chat/                  # Engine dialog, prompt pedagogis, GPU lock & router
+│   │   ├── dataset/               # Validasi format baris & tokenisasi dataset LoRA
 │   │   ├── language/              # Deteksi bahasa, translasi bilingual & locales (id, en)
-│   │   └── dataset/               # Validasi & tokenisasi dataset pelatihan LoRA
-│   ├── main.py                    # Entrypoint server FastAPI
+│   │   ├── memory/                # Penyimpanan sesi (Astra DB / SQLite) & quality gate
+│   │   ├── ocr/                   # Render PDF & client Baidu Unlimited-OCR (vLLM)
+│   │   ├── persona/               # Sanitasi, guardrail & preferensi persona belajar siswa
+│   │   └── rag/                   # Scoped retrieval Astra DB, context builder & auto-learner
+│   ├── main.py                    # Entrypoint server REST API (FastAPI)
 │   └── __init__.py                # Package descriptor
-├── data/                          # Dataset & database SQLite
-├── docs/                          # Dokumen riset, draf skripsi, dan tutorial PDF
-├── notebooks/                     # Notebook eksperimen Colab
-├── scripts/                       # Skrip diagnostik & download model
-├── tests/                         # Unit tests (helper, bahasa, RAG, memori, arsitektur)
-├── training/                      # Skrip pelatihan QLoRA
-├── chat.py                        # CLI chat interaktif
-├── requirements-core.txt
-└── README.md
-`
+├── data/                          # Dataset percakapan & database penyimpanan lokal
+│   ├── lora/                      # Partisi dataset (train, val, test) & chunk Astra DB
+│   ├── demo_dialogues.jsonl       # Contoh dialog buatan untuk pengujian alur
+│   └── lora_dialogues.jsonl       # Dataset lengkap skenario dialog
+├── docs/                          # Dokumentasi riset, draf skripsi & tutorial PDF
+├── notebooks/                     # Jupyter notebooks pelatihan (Colab & Cloud GPU)
+│   ├── Training_LoRA_Colab.ipynb     # Notebook QLoRA di Google Colab GPU (T4/A100)
+│   └── Training_LoRA_CloudGPU.ipynb  # Notebook QLoRA di Cloud GPU sewaan (RTX 5090)
+├── scripts/                       # Skrip diagnostik, setup & dataset generator
+│   ├── dataset_builder/           # Modul builder skenario partisi dataset LoRA
+│   ├── build_lora_dataset.py      # Generator otomatis dataset LoRA dari skenario
+│   ├── check_environment.py       # Pemeriksaan kompatibilitas CUDA & dependensi
+│   ├── download_model.py          # Unduh model dasar Qwen2.5-3B-Instruct
+│   ├── download_ocr_model.py      # Unduh bobot Baidu Unlimited-OCR
+│   └── serve_ocr_vllm.sh          # Runner engine vLLM Unlimited-OCR (port 8001)
+├── tests/                         # Unit tests (arsitektur, RAG, memori, OCR, bahasa, dll.)
+├── training/                      # Skrip pipeline pelatihan QLoRA (BitsAndBytes 4-bit)
+│   └── train_lora.py              # Pelatihan LoRA dengan audit & validasi pedagogis
+├── .env.example                   # Template variabel lingkungan (Astra DB, API keys, dll.)
+├── ARCHITECTURE.md                # Dokumentasi arsitektur cloud-native & skema data
+├── PANDUAN_CLOUD_GPU.md           # Panduan deployment server GPU (FastAPI + vLLM)
+├── chat.py                        # Antarmuka CLI percakapan interaktif terminal
+├── model_record.json              # Rekam jejak model dasar Hugging Face & commit SHA
+├── requirements-core.txt          # Dependensi utama (FastAPI, PyTorch, Transformers, PEFT)
+├── requirements-ocr.txt           # Dependensi OCR & manipulasi dokumen (PyMuPDF, vLLM)
+└── README.md                      # Dokumentasi utama proyek
+```
+
+### Penjelasan Komponen Utama
+
+| Direktori / File | Peran & Deskripsi |
+| :--- | :--- |
+| **`app/`** | Inti backend dengan arsitektur *Layered by Feature*. Terbagi menjadi `core/` (konfigurasi & record model) dan `features/` (`chat`, `rag`, `memory`, `persona`, `ocr`, `language`, `dataset`) yang modular dan terisolasi. |
+| **`adapters/`** | Menyimpan artefak bobot LoRA hasil *fine-tuning* (`final/`), *checkpoint*, metrik evaluasi (`evaluation.json`), serta manifest audit pelatihan (`run_manifest.json`). |
+| **`data/`** | Berisi partisi dataset pelatihan (`lora_train.jsonl`, `lora_val.jsonl`, `lora_test.jsonl`), data chunk Astra DB, dan dialog percontohan. |
+| **`scripts/`** | Perangkat bantu otomatisasi: generator dataset skenario modular (`build_lora_dataset.py`), pengunduh model (Qwen & OCR), serta runner vLLM. |
+| **`training/` & `notebooks/`** | Pipeline QLoRA berbasis BitsAndBytes 4-bit (`train_lora.py`) dan notebook siap pakai untuk Google Colab maupun Cloud GPU sewaan. |
+| **`tests/`** | Rangkaian pengujian unit otomatis untuk memverifikasi integritas arsitektur, retrieval RAG, memori percakapan, OCR, dan sanitasi persona. |
+| **Dokumentasi Root** | [`ARCHITECTURE.md`](ARCHITECTURE.md) (arsitektur *cloud-native* Astra DB & vLLM) dan [`PANDUAN_CLOUD_GPU.md`](PANDUAN_CLOUD_GPU.md) (panduan langkah deployment multi-user di server sewaan). |
 
 ## Pengujian Unit
 
 Jalankan seluruh pengujian unit untuk memverifikasi logika helper dan memori percakapan:
 
-`ash
+```bash
 python -m unittest discover tests
-`
+```
 
 ## Instalasi di terminal Ubuntu WSL
 
