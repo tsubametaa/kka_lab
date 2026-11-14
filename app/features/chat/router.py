@@ -23,6 +23,7 @@ router = APIRouter(tags=['chat'])
 
 class ChatRequest(BaseModel):
     user_id: str = Field(min_length=1, max_length=128)
+    student_name: str | None = Field(default=None, max_length=120)
     question: str = Field(min_length=1, max_length=120000)
     session_id: str | None = None
     mode: str = 'umum'
@@ -74,7 +75,7 @@ def chat(payload: ChatRequest, request: Request, background_tasks: BackgroundTas
         persona = store.get_persona(payload.user_id)
         answer = assistant.answer(
             question, payload.mode, active_history, context, memory, lang=lang,
-            persona=persona,
+            persona=persona, student_name=payload.student_name or '',
         )
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error

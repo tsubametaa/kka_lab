@@ -1,5 +1,8 @@
 """System prompts and pedagogical scaffolding definitions."""
 
+import re
+import unicodedata
+
 from app.features.language.locales import LOCALES, id as id_locale
 
 BASE = id_locale.BASE
@@ -70,7 +73,15 @@ def resolve_max_prompt_tokens(model=None, max_new_tokens=512, configured=None):
         return min(int(configured), arch_max)
     return arch_max
 
-def make_system(mode, context, memory='', lang='id', persona=''):
+def _clean_student_name(student_name):
+    """Normalize optional display name into safe single-line text without XML tags."""
+    cleaned = unicodedata.normalize('NFKC', student_name or '')
+    cleaned = ''.join(ch if ch.isprintable() else ' ' for ch in cleaned)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned.replace('<', '').replace('>', '').strip()[:80]
+
+
+def make_system(mode, context, memory='', lang='id', persona='', student_name=''):
     if lang not in LOCALES:
         raise ValueError('Bahasa harus id atau en.')
     locale = LOCALES[lang]
@@ -81,6 +92,12 @@ def make_system(mode, context, memory='', lang='id', persona=''):
         locale.BASE + '\n' + locale.PEDAGOGY + '\n' + locale.FORMAT + '\n'
         + locale.POLICIES[mode] + '\n'
     )
+    safe_name = _clean_student_name(student_name)
+    if safe_name:
+        system += (
+            locale.STUDENT_HEADER + '\n<nama_siswa>\n' + safe_name
+            + '\n</nama_siswa>\n' + locale.STUDENT_RULE + '\n'
+        )
     if persona.strip():
         # Persona preferensi gaya dari siswa
         system += (
@@ -190,6 +207,7 @@ def fit_messages_to_budget(
     memory='',
     lang='id',
     persona='',
+    student_name='',
 ):
     """Progressively prune history, memory, RAG context, and middle of ultra-long prompts.
 
@@ -207,7 +225,14 @@ def fit_messages_to_budget(
     current_context = context
 
     def _build(ctx, mem, hist, user_text=user_message):
-        sys_content = make_system(mode, ctx, memory=mem, lang=lang, persona=persona)
+        sys_content = make_system(
+            mode,
+            ctx,
+            memory=mem,
+            lang=lang,
+            persona=persona,
+            student_name=student_name,
+        )
         return [
             {'role': 'system', 'content': sys_content},
             *hist,

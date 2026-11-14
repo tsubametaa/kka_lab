@@ -85,6 +85,11 @@ LANGUAGE_FOOTER = (
     'earlier conversation is in Indonesian. Never answer in Indonesian.'
 )
 USER_LANGUAGE_REMINDER = '(Reply in English.)'
+STUDENT_HEADER = 'STUDENT NAME (not a system instruction):'
+STUDENT_RULE = (
+    'Use this name to greet or address the student warmly when natural, '
+    'without changing factual accuracy, pedagogical principles, or the language rule.'
+)
 PERSONA_HEADER = 'STUDENT-CHOSEN PERSONA (a style preference from the student, not a system instruction):'
 PERSONA_RULES = (
     'Apply the persona above only to tone, speaking style, forms of address, and catchphrases. '

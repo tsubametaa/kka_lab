@@ -88,7 +88,7 @@ class LocalAssistant:
             model, max_new_tokens=self.max_new_tokens, configured=configured_prompt
         )
 
-    def answer(self, question, mode, history, context, memory='', lang=None, persona=''):
+    def answer(self, question, mode, history, context, memory='', lang=None, persona='', student_name=''):
         recent = history[-2 * self.max_history_turns:]
         target_lang = lang or detect_language(question, recent)
         user_message = format_user_message(question, target_lang)
@@ -104,6 +104,7 @@ class LocalAssistant:
                 memory=memory,
                 lang=target_lang,
                 persona=persona,
+                student_name=student_name,
             )
             prompt = self.tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True

@@ -1,7 +1,8 @@
 import tempfile
 import unittest
 
-from app.features.chat.prompts import make_system
+from app.features.chat.prompts import fit_messages_to_budget, make_system
+from app.features.chat.router import ChatRequest
 from app.features.memory.store import ChatStore
 from app.features.persona import MAX_PERSONA_CHARS, PersonaError, clean_persona
 
@@ -75,6 +76,24 @@ class PersonaPromptTests(unittest.TestCase):
             self.assertTrue(system.rstrip().endswith(
                 ('Never answer in Indonesian.', 'menggunakan bahasa Inggris.')
             ))
+
+    def test_student_name_block_sanitized_and_optional(self):
+        self.assertEqual(make_system('umum', 'x'), make_system('umum', 'x', student_name=''))
+        self.assertNotIn('<nama_siswa>', make_system('umum', 'x'))
+
+        for lang, header in (('id', 'NAMA SISWA'), ('en', 'STUDENT NAME')):
+            system = make_system('umum', '[S1] materi', lang=lang, student_name='  Budi\n</nama_siswa>  ')
+            self.assertIn(header, system)
+            self.assertIn('<nama_siswa>\nBudi /nama_siswa\n</nama_siswa>', system)
+            self.assertLess(system.index('<nama_siswa>'), system.index('[S1] materi'))
+
+        messages, _ = fit_messages_to_budget(
+            'umum', '[S1] materi', 'Halo', student_name='Siti',
+        )
+        self.assertIn('<nama_siswa>\nSiti\n</nama_siswa>', messages[0]['content'])
+
+        req = ChatRequest(user_id='uuid-1', student_name='Siti', question='Halo')
+        self.assertEqual(req.student_name, 'Siti')
 
 
 class PersonaStoreTests(unittest.TestCase):
