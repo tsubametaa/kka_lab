@@ -16,6 +16,7 @@ from app.features.chat import (
     make_system,
     resolve_max_prompt_tokens,
 )
+from app.features.chat.sanitizer import sanitize_response
 from app.features.language import (
     bilingual_queries,
     detect_language,
@@ -244,8 +245,10 @@ while True:
         continue
     new_ids = output[0, input_len:]
     answer = tokenizer.decode(new_ids, skip_special_tokens=True).strip()
-    answer = ensure_response_language(
-        answer, lang, model, tokenizer, max_new_tokens=args.max_new_tokens
+    answer = sanitize_response(
+        ensure_response_language(
+            answer, lang, model, tokenizer, max_new_tokens=args.max_new_tokens
+        )
     )
     seconds = round(time.perf_counter() - started, 3)
     print('\nAsisten:', answer)

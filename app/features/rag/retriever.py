@@ -17,6 +17,20 @@ except ImportError:  # pragma: no cover
 from app.features.rag.exceptions import RagUnavailableError
 
 TRANSIENT_HTTP_STATUSES = {429, 500, 502, 503, 504}
+DEFAULT_MIN_SIMILARITY = 0.70
+
+
+def get_min_similarity(min_similarity=None):
+    """Return configured minimum vector similarity floor (<= 0 disables filtering)."""
+    if min_similarity is not None:
+        return float(min_similarity)
+    raw = os.getenv('RAG_MIN_SIMILARITY', str(DEFAULT_MIN_SIMILARITY)).strip()
+    if not raw:
+        return DEFAULT_MIN_SIMILARITY
+    try:
+        return float(raw)
+    except ValueError:
+        return DEFAULT_MIN_SIMILARITY
 
 def _http_status_code(exc):
     response = getattr(exc, 'response', None)
@@ -97,7 +111,7 @@ def _fetch_query_docs(collection, query, top_k, retries=2, backoff=1.5, query_fi
                 f'Gagal mengambil konteks dari Astra DB: {exc}'
             ) from exc
 
-def retrieve(question, top_k=3, retries=2, backoff=1.5, user_id=None):
+def retrieve(question, top_k=3, retries=2, backoff=1.5, user_id=None, min_similarity=None):
     collection = get_astra_collection()
     scope_filter = build_scope_filter(user_id)
     queries = [question] if isinstance(question, str) else question
@@ -129,5 +143,12 @@ def retrieve(question, top_k=3, retries=2, backoff=1.5, user_id=None):
         if isinstance(doc.get('$similarity'), (int, float)) else -1,
         reverse=True,
     )
+    threshold = get_min_similarity(min_similarity)
+    if threshold > 0:
+        ranked = [
+            doc for doc in ranked
+            if not isinstance(doc.get('$similarity'), (int, float))
+            or doc['$similarity'] >= threshold
+        ]
     return ranked[:top_k]
 

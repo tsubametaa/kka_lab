@@ -7,9 +7,10 @@ Panduan urut dari awal menyewa instance GPU, memasang Qwen + **Baidu Unlimited-O
 ## 1. Spesifikasi Sewa Instance yang Dipilih
 
 Saat membuat instance baru di penyedia Cloud GPU:
-- **GPU:** RTX 5090 (32 GB VRAM) — *cukup 1 GPU untuk menjalankan Qwen + Unlimited-OCR bersamaan*.
+
+- **GPU:** RTX 5090 (32 GB VRAM) — _cukup 1 GPU untuk menjalankan Qwen + Unlimited-OCR bersamaan_.
 - **Ukuran Instance:** **`8 Core • 16 GB RAM • 200 GB storage`**
-- **Image / Template:** **PyTorch + Jupyter** *(berbasis Ubuntu, sudah termasuk driver NVIDIA & CUDA ≥ 12.8)*.
+- **Image / Template:** **PyTorch + Jupyter** _(berbasis Ubuntu, sudah termasuk driver NVIDIA & CUDA ≥ 12.8)_.
 - **SSH Key:** Tambahkan SSH public key laptop Anda (opsional, karena Terminal di web Jupyter juga sudah bisa langsung dipakai).
 
 ---
@@ -19,14 +20,16 @@ Saat membuat instance baru di penyedia Cloud GPU:
 Buka **JupyterLab** dari dashboard penyedia GPU, klik menu **Terminal**, lalu pilih salah satu cara:
 
 ### Cara A — Lewat GitHub (Disarankan)
+
 ```bash
 git clone https://github.com/<username-anda>/kka_lab.git
 cd kka_lab
 ```
 
 ### Cara B — Lewat Upload ZIP
+
 1. Di laptop Windows, kompres folder `kka_lab` menjadi `kka_lab.zip` (**JANGAN masukkan folder `.venv`**, karena `.venv` laptop adalah versi Windows).
-2. Seret (*drag & drop*) `kka_lab.zip` ke panel kiri JupyterLab.
+2. Seret (_drag & drop_) `kka_lab.zip` ke panel kiri JupyterLab.
 3. Di Terminal Jupyter, jalankan:
    ```bash
    unzip kka_lab.zip
@@ -96,26 +99,97 @@ python scripts/download_ocr_model.py
 
 ---
 
-## 4. (Opsional) Jika Mau Melatih / Fine-Tuning LoRA Dulu
+## 4. Jika Mau Melatih / Fine-Tuning LoRA Dataset v3 Dulu
 
-Jika Anda belum memiliki adaptor LoRA atau ingin melatih ulang:
+Jika Anda belum memiliki adaptor LoRA v3 atau ingin melatih ulang serta membandingkan **Qwen2.5-3B-Instruct** vs **Qwen3-4B-Instruct-2507**:
 
-1. Pastikan dataset penelitian (`data/lora/lora_train.jsonl` 600 baris, `data/lora/lora_val.jsonl` 130 baris, `data/lora/lora_test.jsonl` 120 baris) sudah tersedia dari `data/rag_data.jsonl` (atau bangun ulang dengan `python scripts/build_lora_dataset.py`).
-2. Buka notebook **`notebooks/Training_LoRA_CloudGPU.ipynb`** di JupyterLab, atau jalankan langsung via terminal *(default sudah memakai `target_modules='all-linear'`, `r=16`, `lora_alpha=32`, `lora_dropout=0.1`, `epochs=6`, dan `EarlyStoppingCallback`)*:
+1. Pastikan **Dataset v3** (`data/lora/lora_train.jsonl` **760 baris**, `data/lora/lora_val.jsonl` **172 baris**, `data/lora/lora_test.jsonl` **162 baris**) sudah tersedia dan tervalidasi:
+   ```bash
+   python scripts/evaluate_assistant.py --check-dataset
+   ```
+2. **Tahap A — Latih & Evaluasi Dataset v3 pada `Qwen/Qwen2.5-3B-Instruct` (~5–8 menit di Cloud GPU):**
+
+   ```bash
+   python scripts/download_model.py --model Qwen/Qwen2.5-3B-Instruct --record model_record.json --force
+
+   python training/train_lora.py \
+     --data data/lora/lora_train.jsonl \
+     --val-data data/lora/lora_val.jsonl \
+     --record model_record.json \
+     --out adapters/qwen-kka-lora-v3-qwen25 \
+     --epochs 4 \
+     --eval-strategy epoch \
+     --early-stopping-patience 2 \
+     --precision bf16 \
+     --batch-size 4 \
+     --grad-accum 2 \
+     --lr 1e-4 \
+     --weight-decay 0.05 \
+     --max-grad-norm 1.0 \
+     --neftune-noise-alpha 5.0
+
+   python scripts/evaluate_assistant.py \
+     --local-adapter adapters/qwen-kka-lora-v3-qwen25/final \
+     --save-report exports/eval_v3_qwen25_adapter.json \
+     --save-responses exports/eval_v3_qwen25_responses.jsonl
+   ```
+
+3. **Tahap B — Latih & Evaluasi Dataset v3 pada `Qwen/Qwen3-4B-Instruct-2507` (~7–10 menit di Cloud GPU):**
+
+   ```bash
+   python scripts/download_model.py --model Qwen/Qwen3-4B-Instruct-2507 --record model_record.json --force
+
+   python training/train_lora.py \
+     --data data/lora/lora_train.jsonl \
+     --val-data data/lora/lora_val.jsonl \
+     --record model_record.json \
+     --out adapters/qwen-kka-lora-v3-qwen3-4b \
+     --epochs 4 \
+     --eval-strategy epoch \
+     --early-stopping-patience 2 \
+     --precision bf16 \
+     --batch-size 4 \
+     --grad-accum 2 \
+     --lr 1e-4 \
+     --weight-decay 0.05 \
+     --max-grad-norm 1.0 \
+     --neftune-noise-alpha 5.0
+
+   python scripts/evaluate_assistant.py \
+     --local-adapter adapters/qwen-kka-lora-v3-qwen3-4b/final \
+     --save-report exports/eval_v3_qwen3_4b_adapter.json \
+     --save-responses exports/eval_v3_qwen3_4b_responses.jsonl
+   ```
+
+4. Untuk **GPU lokal VRAM terbatas seperti RTX 3050 6 GB** (4-bit QLoRA dengan pengaman anti-OOM otomatis):
    ```bash
    python training/train_lora.py \
      --data data/lora/lora_train.jsonl \
      --val-data data/lora/lora_val.jsonl \
      --record model_record.json \
-     --out adapters/qwen-kka-lora \
-     --epochs 6 \
-     --precision bf16 --batch-size 4 --grad-accum 2
+     --out adapters/qwen-kka-lora-v3 \
+     --preset rtx3050-6gb \
+     --precision bf16 \
+     --epochs 3 \
+     --eval-strategy epoch \
+     --early-stopping-patience 1 \
+     --neftune-noise-alpha 5.0
    ```
-3. Setelah selesai, arahkan `.env` ke adaptor hasil training:
+   _(Preset `rtx3050-6gb` otomatis menyetel `--batch-size 1 --grad-accum 8 --max-length 1536 --lora-r 8 --lora-alpha 16 --empty-cache-steps 4`, `prediction_loss_only=True`, `eval_accumulation_steps=1`, `gradient_checkpointing=True`, dan `install_vram_optimizations` agar aman di 6 GB VRAM.)_
+5. Setelah selesai, arahkan `.env` ke adaptor terbaik hasil perbandingan (`adapters/qwen-kka-lora-v3-qwen25/final` atau `adapters/qwen-kka-lora-v3-qwen3-4b/final`):
    ```env
-   MODEL_ADAPTER=adapters/qwen-kka-lora/final
+   MODEL_ADAPTER=adapters/qwen-kka-lora-v3-qwen3-4b/final
    ```
-4. **WAJIB BACKUP:** Unduh file ZIP di folder `exports/` ke laptop Anda (klik kanan di Jupyter $\rightarrow$ **Download**). Jika masa sewa habis dan menyewa GPU baru di kemudian hari, Anda **tidak perlu training ulang** — cukup unggah kembali folder adaptor tersebut.
+6. **WAJIB BACKUP:** Kompres dan unduh hasil adaptor serta laporan evaluasi di folder `exports/` ke laptop Anda:
+   ```bash
+   zip -r exports/hasil_training_v3_bundle.zip \
+     model_record.json \
+     adapters/qwen-kka-lora-v3-qwen25 \
+     adapters/qwen-kka-lora-v3-qwen3-4b \
+     exports/eval_*.json \
+     exports/eval_*.jsonl
+   ```
+   Klik kanan file `exports/hasil_training_v3_bundle.zip` di JupyterLab $\rightarrow$ **Download**. Jika masa sewa habis, Anda **tidak perlu training ulang** — cukup ekstrak kembali ke laptop atau server baru.
 
 ---
 
@@ -124,31 +198,36 @@ Jika Anda belum memiliki adaptor LoRA atau ingin melatih ulang:
 Gunakan **`tmux`** supaya server tetap hidup meskipun tab browser Jupyter atau koneksi SSH Anda tertutup.
 
 ### Langkah 5A — Nyalakan Engine Unlimited-OCR (Port Lokal `8001`)
+
 ```bash
 tmux new -s ocr
 cd ~/kka_lab
 bash scripts/serve_ocr_vllm.sh
 ```
-* Tunggu sampai muncul log `Application startup complete` / `Uvicorn running on http://127.0.0.1:8001`.
-* Skrip ini otomatis membatasi pemakaian VRAM OCR sebesar **45% (~14 GB)** sehingga sisa **~18 GB VRAM** aman untuk model Qwen.
-* Tekan **`Ctrl+B`**, lepas, lalu tekan **`D`** untuk keluar dari layar `tmux` tanpa mematikan proses OCR.
+
+- Tunggu sampai muncul log `Application startup complete` / `Uvicorn running on http://127.0.0.1:8001`.
+- Skrip ini otomatis membatasi pemakaian VRAM OCR sebesar **45% (~14 GB)** sehingga sisa **~18 GB VRAM** aman untuk model Qwen.
+- Tekan **`Ctrl+B`**, lepas, lalu tekan **`D`** untuk keluar dari layar `tmux` tanpa mematikan proses OCR.
 
 ### Langkah 5B — Nyalakan API Utama `kka_lab` (Port `8000`)
+
 ```bash
 tmux new -s api
 cd ~/kka_lab
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
-* Tunggu hingga model Qwen selesai dimuat dan muncul `Uvicorn running on http://0.0.0.0:8000`.
-* Tekan **`Ctrl+B`**, lepas, lalu tekan **`D`** untuk melepas layar `tmux`.
+
+- Tunggu hingga model Qwen selesai dimuat dan muncul `Uvicorn running on http://0.0.0.0:8000`.
+- Tekan **`Ctrl+B`**, lepas, lalu tekan **`D`** untuk melepas layar `tmux`.
 
 ### Langkah 5C — Tes Cepat dari Terminal GPU
+
 ```bash
 curl http://127.0.0.1:8000/api/health
 # Output yang diharapkan: {"status":"ok"}
 ```
 
-*(Tips `tmux`: ketik `tmux ls` untuk melihat proses aktif, `tmux attach -t ocr` untuk melihat log OCR, atau `tmux attach -t api` untuk melihat log FastAPI).*
+_(Tips `tmux`: ketik `tmux ls` untuk melihat proses aktif, `tmux attach -t ocr` untuk melihat log OCR, atau `tmux attach -t api` untuk melihat log FastAPI)._
 
 ---
 
@@ -158,7 +237,7 @@ Agar backend TypeScript/Go Anda bisa memanggil server GPU melalui HTTPS (`https:
 
 ### Cara A — Menggunakan Domain Sendiri (Rekomendasi untuk Deploy & Backend TS/Go)
 
-**Prasyarat:** Anda sudah memiliki akun Cloudflare (gratis) dan 1 domain yang *nameserver*-nya aktif di Cloudflare.
+**Prasyarat:** Anda sudah memiliki akun Cloudflare (gratis) dan 1 domain yang _nameserver_-nya aktif di Cloudflare.
 
 1. **Buat Tunnel di Dashboard Cloudflare:**
    - Buka [one.dash.cloudflare.com](https://one.dash.cloudflare.com) (**Cloudflare Zero Trust**).
@@ -167,7 +246,8 @@ Agar backend TypeScript/Go Anda bisa memanggil server GPU melalui HTTPS (`https:
    - Beri nama tunnel (contoh: `kka-gpu-server`) $\rightarrow$ klik **Save tunnel**.
 
 2. **Pasang `cloudflared` di Terminal GPU Vast.ai:**
-   *(Di halaman konfigurasi Cloudflare pilih **Debian / Ubuntu** dan **64-bit**, atau jalankan langsung perintah di bawah ini di Terminal GPU).*
+   _(Di halaman konfigurasi Cloudflare pilih **Debian / Ubuntu** dan **64-bit**, atau jalankan langsung perintah di bawah ini di Terminal GPU)._
+
    ```bash
    curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
    dpkg -i cloudflared.deb
@@ -176,22 +256,25 @@ Agar backend TypeScript/Go Anda bisa memanggil server GPU melalui HTTPS (`https:
    ```
 
 3. **Jalankan Tunnel di dalam `tmux` (Penting untuk Container Vast.ai):**
+
    > **CATATAN VAST.AI:** Container Docker di Vast.ai umumnya tidak menjalankan `systemd`. Jangan gunakan `sudo cloudflared service install ...` karena sering gagal; jalankan langsung di `tmux` menggunakan **token** yang muncul di dashboard Cloudflare:
+
    ```bash
    tmux new -s tunnel
    cloudflared tunnel run --token <PASTE_TOKEN_TUNNEL_ANDA_DI_SINI>
    ```
+
    - Tunggu sampai muncul log `Registered tunnel connection` (berarti koneksi dari GPU ke Cloudflare sudah tersambung).
    - Tekan **`Ctrl+B`**, lepas, lalu tekan **`D`** untuk keluar dari layar `tmux` tanpa mematikan tunnel.
 
 4. **Arahkan Public Hostname di Dashboard Cloudflare:**
    - Klik **Next** di halaman Cloudflare (atau buka tab **Public Hostname** $\rightarrow$ **Add a public hostname**), lalu isi:
-     - **Subdomain:** `ai` *(contoh hasil: `ai.domainanda.com`)*
+     - **Subdomain:** `ai` _(contoh hasil: `ai.domainanda.com`)_
      - **Domain:** pilih domain Anda
      - **Service Type:** `HTTP`
-     - **URL:** `127.0.0.1:8000` *(atau `localhost:8000`)*
+     - **URL:** `127.0.0.1:8000` _(atau `localhost:8000`)_
    - Klik **Save tunnel** / **Save hostname**.
-   - *(Catatan: Port `8001` milik vLLM OCR **tidak perlu** diekspos keluar karena hanya dipanggil secara internal oleh FastAPI).*
+   - _(Catatan: Port `8001` milik vLLM OCR **tidak perlu** diekspos keluar karena hanya dipanggil secara internal oleh FastAPI)._
 
 5. **Tes dari Laptop / Terminal Lain:**
    ```bash
@@ -219,7 +302,7 @@ Jika Anda belum memiliki domain di Cloudflare dan hanya ingin mengetes koneksi H
    ```bash
    curl https://contoh-acak-kata.trycloudflare.com/api/health
    ```
-   *(Catatan: URL `trycloudflare.com` selalu berubah setiap kali proses tunnel dimatikan/restart, sehingga untuk pemakaian kelas/production tetap gunakan **Cara A**).*
+   _(Catatan: URL `trycloudflare.com` selalu berubah setiap kali proses tunnel dimatikan/restart, sehingga untuk pemakaian kelas/production tetap gunakan **Cara A**)._
 
 ---
 
@@ -229,7 +312,9 @@ Seluruh request dari backend TS/Go ke `https://ai.domainanda.com` wajib menyerta
 `X-API-Key: <nilai AI_INTERNAL_SECRET di .env>`
 
 ### A. Siswa Upload PDF / Gambar Materi (Privat per Siswa — Opsi 1)
+
 Dokumen hanya bisa dibaca oleh `user_id` pengunggah + materi global kelas:
+
 ```bash
 curl -X POST "https://ai.domainanda.com/api/rag/documents" \
   -H "X-API-Key: isi-kunci-rahasia-internal-anda" \
@@ -239,7 +324,9 @@ curl -X POST "https://ai.domainanda.com/api/rag/documents" \
   -F "source_title=Catatan Bab Klasifikasi" \
   -F "topic=Klasifikasi"
 ```
+
 Respons instan (`202 Accepted`):
+
 ```json
 {
   "job_id": "9f8c1d2e-...",
@@ -251,7 +338,9 @@ Respons instan (`202 Accepted`):
 ```
 
 ### B. Guru / Admin Upload Materi Kelas Bersama (`scope=global`)
+
 Terbaca oleh seluruh siswa di kelas (wajib menyertakan `X-Admin-Key`):
+
 ```bash
 curl -X POST "https://ai.domainanda.com/api/rag/documents" \
   -H "X-API-Key: isi-kunci-rahasia-internal-anda" \
@@ -264,12 +353,14 @@ curl -X POST "https://ai.domainanda.com/api/rag/documents" \
 ```
 
 ### C. Cek Status Pemrosesan OCR (`queued` $\rightarrow$ `processing` $\rightarrow$ `completed`)
+
 ```bash
 curl "https://ai.domainanda.com/api/rag/jobs/9f8c1d2e-...?user_id=siswa_101" \
   -H "X-API-Key: isi-kunci-rahasia-internal-anda"
 ```
 
 ### D. Daftar & Hapus Dokumen Siswa
+
 ```bash
 # Lihat daftar dokumen yang pernah diunggah siswa
 curl "https://ai.domainanda.com/api/users/siswa_101/documents" \
@@ -291,6 +382,7 @@ curl -X DELETE "https://ai.domainanda.com/api/rag/documents/auto_kka_xxxxxxxxxxx
 ```
 
 ### E. Siswa Mengirim Pertanyaan Chat (Otomatis Membaca RAG Global + Dokumen Privatnya)
+
 ```bash
 curl -X POST "https://ai.domainanda.com/api/chat" \
   -H "Content-Type: application/json" \
@@ -306,20 +398,19 @@ curl -X POST "https://ai.domainanda.com/api/chat" \
 
 ## 8. Checklist Wajib Sebelum Menghentikan / Menghapus Instance Sewa
 
-Disk pada Cloud GPU bersifat sementara (*ephemeral*) dan akan terhapus permanen saat instance di-*terminate* (dihapus). Sebelum masa sewa berakhir, pastikan Anda mengunduh:
+Disk pada Cloud GPU bersifat sementara (_ephemeral_) dan akan terhapus permanen saat instance di-_terminate_ (dihapus). Sebelum masa sewa berakhir, pastikan Anda mengunduh:
 
 1. **Adaptor LoRA** (folder `exports/*.zip` atau `adapters/.../final/`) jika Anda baru saja melakukan training.
 2. **File `model_record.json` & `ocr_model_record.json`** agar revisi model tetap konsisten di sesi berikutnya.
-3. *(Catatan: Seluruh data materi RAG dari PDF/Unlimited-OCR, status job, riwayat chat, dan memori tersimpan aman di cloud **DataStax Astra DB**, sehingga **tidak akan pernah hilang** meskipun instance sewa GPU dimatikan atau dihapus).*
+3. _(Catatan: Seluruh data materi RAG dari PDF/Unlimited-OCR, status job, riwayat chat, dan memori tersimpan aman di cloud **DataStax Astra DB**, sehingga **tidak akan pernah hilang** meskipun instance sewa GPU dimatikan atau dihapus)._
 
 ---
 
 ## 9. Solusi Masalah Cepat (Troubleshooting)
 
-| Gejala / Pesan Error | Penyebab | Solusi Cepat |
-| :--- | :--- | :--- |
-| Job berstatus `failed`: `Gagal menghubungi server Unlimited-OCR di http://127.0.0.1:8001` | Proses vLLM OCR belum jalan atau baru loading. | Cek dengan `tmux attach -t ocr`. Tunggu sampai vLLM selesai memuat model. |
-| `Astra DB mengembalikan 503 Service Unavailable` | Database Astra DB berstatus *Hibernated*. | Buka dashboard Astra DB, klik **Resume**, tunggu 1–2 menit, lalu ulangi upload/chat. |
-| `HTTP 403` saat upload `scope=global` | `RAG_ADMIN_SECRET` belum diisi di `.env` atau header `X-Admin-Key` tidak cocok. | Pastikan `RAG_ADMIN_SECRET` di `.env` sama persis dengan header `X-Admin-Key` yang dikirim backend. |
-| `CUDA out of memory` saat menyalakan proses kedua | Sisa VRAM tidak cukup. | Kecilkan porsi memori vLLM: `OCR_GPU_MEMORY_UTILIZATION=0.35 bash scripts/serve_ocr_vllm.sh`. |
-
+| Gejala / Pesan Error                                                                      | Penyebab                                                                        | Solusi Cepat                                                                                        |
+| :---------------------------------------------------------------------------------------- | :------------------------------------------------------------------------------ | :-------------------------------------------------------------------------------------------------- |
+| Job berstatus `failed`: `Gagal menghubungi server Unlimited-OCR di http://127.0.0.1:8001` | Proses vLLM OCR belum jalan atau baru loading.                                  | Cek dengan `tmux attach -t ocr`. Tunggu sampai vLLM selesai memuat model.                           |
+| `Astra DB mengembalikan 503 Service Unavailable`                                          | Database Astra DB berstatus _Hibernated_.                                       | Buka dashboard Astra DB, klik **Resume**, tunggu 1–2 menit, lalu ulangi upload/chat.                |
+| `HTTP 403` saat upload `scope=global`                                                     | `RAG_ADMIN_SECRET` belum diisi di `.env` atau header `X-Admin-Key` tidak cocok. | Pastikan `RAG_ADMIN_SECRET` di `.env` sama persis dengan header `X-Admin-Key` yang dikirim backend. |
+| `CUDA out of memory` saat menyalakan proses kedua                                         | Sisa VRAM tidak cukup.                                                          | Kecilkan porsi memori vLLM: `OCR_GPU_MEMORY_UTILIZATION=0.35 bash scripts/serve_ocr_vllm.sh`.       |

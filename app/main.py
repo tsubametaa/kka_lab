@@ -13,7 +13,7 @@ except ImportError:
 from fastapi import Depends, FastAPI
 
 from app.core.security import verify_internal_api_key
-from app.features.chat.assistant import LocalAssistant
+from app.features.chat.assistant import LocalAssistant, create_assistant
 from app.features.chat.router import ChatRequest, router as chat_router
 from app.features.memory.router import KnowledgeRequest, router as memory_router
 from app.features.memory.store import ChatStore
@@ -29,8 +29,13 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.store = ChatStore()
-    app.state.assistant = LocalAssistant()
-    yield
+    app.state.assistant = create_assistant()
+    try:
+        yield
+    finally:
+        aclose = getattr(app.state.assistant, 'aclose', None)
+        if callable(aclose):
+            await aclose()
 
 app = FastAPI(title='Kyara AI', lifespan=lifespan)
 

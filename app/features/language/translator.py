@@ -51,10 +51,10 @@ def ensure_response_language(answer, expected_lang, model, tokenizer, max_new_to
             'role': 'system',
             'content': (
                 f'Translate the assistant response into natural {target_name}. '
-                'Preserve all [S1], [S2] source labels, numbered or bulleted steps, '
-                'reasoning, and closing reflection questions. When translating '
-                f'curriculum acronyms or terms, explain their meaning clearly in {target_name}. '
-                'Return only the translated response without extra commentary.'
+                'Preserve numbered or bulleted steps, reasoning, and any '
+                'closing reflection questions without adding citation tags like [S1]. '
+                'When translating curriculum acronyms or terms, explain their meaning '
+                f'clearly in {target_name}. Return only the translated response without extra commentary.'
             ),
         },
         {'role': 'user', 'content': answer},

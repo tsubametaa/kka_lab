@@ -34,19 +34,151 @@ def build_parser():
     parser.add_argument('--grad-accum', type=int, default=8)
     parser.add_argument('--max-length', type=int, default=2048)
     parser.add_argument('--epochs', type=int, default=6)
-    parser.add_argument('--lr', type=float, default=1.5e-4)
+    parser.add_argument('--lr', type=float, default=1e-4)
+    parser.add_argument('--weight-decay', type=float, default=0.05)
+    parser.add_argument('--eval-strategy', choices=['epoch', 'steps'], default='steps')
+    parser.add_argument('--eval-steps', type=int, default=25)
     parser.add_argument('--lora-r', type=int, default=16)
     parser.add_argument('--lora-alpha', type=int, default=32)
     parser.add_argument('--lora-dropout', type=float, default=0.1)
     parser.add_argument('--target-modules', default='all-linear')
-    parser.add_argument('--early-stopping-patience', type=int, default=2)
+    parser.add_argument('--early-stopping-patience', type=int, default=3)
+    parser.add_argument('--max-grad-norm', type=float, default=1.0)
+    parser.add_argument('--neftune-noise-alpha', type=float, default=0.0)
+    parser.add_argument('--empty-cache-steps', type=int, default=0)
+    parser.add_argument(
+        '--preset',
+        choices=['rtx3050-6gb'],
+        default=None,
+        help='Preset hyperparameter aman untuk GPU VRAM terbatas (mis. RTX 3050 6 GB).',
+    )
     return parser
+
+
+def parse_target_modules(raw_value: str):
+    """Ubah argumen --target-modules menjadi 'all-linear' atau daftar modul proyeksi."""
+    cleaned = (raw_value or '').strip()
+    if cleaned == 'all-linear':
+        return 'all-linear'
+    modules = [m.strip() for m in cleaned.split(',') if m.strip()]
+    if not modules:
+        raise ValueError('--target-modules tidak boleh kosong.')
+    return modules
+
+
+def install_vram_optimizations(model, compute_dtype, torch):
+    """Hemat >2 GB VRAM pada GPU 6 GB dengan menjaga matriks embedding 2D tetap 16-bit
+    serta hanya menghitung proyeksi lm_head + cross_entropy pada posisi token berlabel != -100."""
+    for _name, param in model.named_parameters():
+        if not param.requires_grad and param.ndim >= 2 and param.__class__.__name__ != 'Params4bit':
+            param.data = param.data.to(compute_dtype)
+
+    base = getattr(model, 'base_model', None)
+    causal_lm = getattr(base, 'model', model)
+    if not (hasattr(causal_lm, 'model') and hasattr(causal_lm, 'lm_head')):
+        return model
+
+    orig_forward = causal_lm.forward
+
+    def masked_causal_lm_forward(
+        input_ids=None,
+        attention_mask=None,
+        position_ids=None,
+        past_key_values=None,
+        inputs_embeds=None,
+        labels=None,
+        use_cache=None,
+        cache_position=None,
+        logits_to_keep=0,
+        num_items_in_batch=None,
+        **kwargs,
+    ):
+        if labels is None:
+            return orig_forward(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                past_key_values=past_key_values,
+                inputs_embeds=inputs_embeds,
+                labels=None,
+                use_cache=use_cache,
+                cache_position=cache_position,
+                logits_to_keep=logits_to_keep,
+                **kwargs,
+            )
+        outputs = causal_lm.model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            cache_position=cache_position,
+            **kwargs,
+        )
+        hidden_states = outputs[0] if isinstance(outputs, tuple) else outputs.last_hidden_state
+        shift_hidden = hidden_states[..., :-1, :].contiguous().view(-1, hidden_states.size(-1))
+        shift_labels = labels[..., 1:].contiguous().view(-1).to(shift_hidden.device)
+        valid_mask = shift_labels != -100
+        if torch.any(valid_mask):
+            active_hidden = shift_hidden[valid_mask]
+            active_labels = shift_labels[valid_mask]
+            active_logits = causal_lm.lm_head(active_hidden).float()
+            reduction = 'sum' if num_items_in_batch is not None else 'mean'
+            loss = torch.nn.functional.cross_entropy(
+                active_logits, active_labels, reduction=reduction
+            )
+            if reduction == 'sum':
+                if torch.is_tensor(num_items_in_batch):
+                    num_items_in_batch = num_items_in_batch.to(loss.device)
+                loss = loss / num_items_in_batch
+            dummy_logits = active_logits[:1, :1].unsqueeze(0).detach()
+        else:
+            loss = hidden_states[:, :1, :].sum() * 0.0
+            dummy_logits = hidden_states[:, :1, :1].float().detach()
+
+        if isinstance(outputs, tuple):
+            return (loss, dummy_logits) + outputs[1:]
+        try:
+            from transformers.modeling_outputs import CausalLMOutputWithPast
+            return CausalLMOutputWithPast(loss=loss, logits=dummy_logits)
+        except Exception:
+            return {'loss': loss, 'logits': dummy_logits}
+
+    causal_lm.forward = masked_causal_lm_forward
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return model
+
+
+def apply_preset(args):
+    """Validasi argumen dasar dan terapkan batas VRAM aman jika user memilih preset hardware."""
+    if args.max_grad_norm < 0:
+        raise ValueError('--max-grad-norm harus >= 0.')
+    if args.neftune_noise_alpha < 0:
+        raise ValueError('--neftune-noise-alpha harus >= 0.')
+    if args.empty_cache_steps < 0:
+        raise ValueError('--empty-cache-steps harus >= 0.')
+    parse_target_modules(args.target_modules)
+    if args.preset == 'rtx3050-6gb':
+        if args.precision not in ('fp16', 'bf16'):
+            args.precision = 'fp16'
+        args.batch_size = 1
+        args.grad_accum = max(args.grad_accum, 8)
+        args.max_length = min(args.max_length, 1536)
+        args.lora_r = min(args.lora_r, 8)
+        args.lora_alpha = min(args.lora_alpha, 16)
+        if args.empty_cache_steps == 0:
+            args.empty_cache_steps = 4
+    return args
 
 def load_and_validate_splits(args):
     if args.batch_size < 1 or args.grad_accum < 1:
         raise ValueError('--batch-size dan --grad-accum minimal 1.')
     if args.max_length < 512:
         raise ValueError('--max-length minimal 512.')
+    if args.eval_steps < 1 or args.weight_decay < 0:
+        raise ValueError('--eval-steps minimal 1 dan --weight-decay tidak boleh negatif.')
     if 'demo' in Path(args.data).name.lower() and not args.allow_demo:
         raise ValueError('Data demo bukan dataset penelitian. Pakai --allow-demo hanya untuk uji alur.')
 
@@ -114,14 +246,16 @@ def require_training_dependencies():
 
 
 def main(argv=None):
-    args = build_parser().parse_args(argv)
+    args = apply_preset(build_parser().parse_args(argv))
     raw, val_sha, train_rows, val_rows = load_and_validate_splits(args)
     record = load_record(args.record)
 
     if args.validate_only:
         print(
             f'Validasi OK: train={len(train_rows)} baris, val={len(val_rows)} baris, '
-            f'model={record.get("model_id")}'
+            f'model={record.get("model_id")}, precision={args.precision}, '
+            f'max_length={args.max_length}, lora_r={args.lora_r}, lora_alpha={args.lora_alpha}, '
+            f'batch={args.batch_size}x{args.grad_accum}'
         )
         return
 
@@ -203,11 +337,7 @@ def main(argv=None):
     model = deps['prepare_model_for_kbit_training'](model)
     model.config.use_cache = False
 
-    target_modules = (
-        'all-linear'
-        if args.target_modules.strip() == 'all-linear'
-        else [m.strip() for m in args.target_modules.split(',') if m.strip()]
-    )
+    target_modules = parse_target_modules(args.target_modules)
     config = deps['LoraConfig'](
         task_type=deps['TaskType'].CAUSAL_LM,
         r=args.lora_r,
@@ -217,24 +347,40 @@ def main(argv=None):
         bias='none',
     )
     model = deps['get_peft_model'](model, config)
+    install_vram_optimizations(model, compute_dtype, torch)
     model.print_trainable_parameters()
 
+    eval_kwargs = (
+        {'eval_steps': args.eval_steps, 'save_steps': args.eval_steps}
+        if args.eval_strategy == 'steps'
+        else {}
+    )
+    extra_train_kwargs = {}
+    if args.neftune_noise_alpha > 0:
+        extra_train_kwargs['neftune_noise_alpha'] = args.neftune_noise_alpha
+    if args.empty_cache_steps > 0:
+        extra_train_kwargs['torch_empty_cache_steps'] = args.empty_cache_steps
     settings = deps['TrainingArguments'](
         output_dir=str(out / 'checkpoints'),
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=1,
         gradient_accumulation_steps=args.grad_accum,
+        prediction_loss_only=True,
+        eval_accumulation_steps=1,
         learning_rate=args.lr,
+        weight_decay=args.weight_decay,
+        max_grad_norm=args.max_grad_norm,
         warmup_ratio=0.05,
         lr_scheduler_type='cosine',
         fp16=not use_bf16,
         bf16=use_bf16,
         gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={'use_reentrant': True},
         optim='paged_adamw_8bit',
         logging_steps=5,
-        eval_strategy='epoch',
-        save_strategy='epoch',
+        eval_strategy=args.eval_strategy,
+        save_strategy=args.eval_strategy,
         save_total_limit=2,
         load_best_model_at_end=True,
         metric_for_best_model='eval_loss',
@@ -244,6 +390,8 @@ def main(argv=None):
         dataloader_num_workers=0,
         remove_unused_columns=False,
         label_names=['labels'],
+        **eval_kwargs,
+        **extra_train_kwargs,
     )
 
     manifest = {

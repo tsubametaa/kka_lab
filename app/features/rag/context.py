@@ -145,25 +145,66 @@ def filter_relevant_history(question, history, max_turns=4):
     return [msg for turn in kept for msg in turn]
 
 
+_LEADING_META_LINE_RE = re.compile(
+    r'^(?:Topik:|Sumber:|Materi:|\[[^\n\]]+>[^\n\]]+\])\s*.*$',
+    re.IGNORECASE,
+)
+_PAGE_MARKER_RE = re.compile(r'[ \t]*\[Halaman\s+buku\s+\d+\][ \t]*', re.IGNORECASE)
+
+
+def _clean_chunk_text(text):
+    """Strip noisy chunk metadata headers and PDF page stamps cleanly."""
+    lines = text.splitlines()
+    while lines and _LEADING_META_LINE_RE.match(lines[0].strip()):
+        lines.pop(0)
+    cleaned_lines = []
+    for line in lines:
+        stripped_line = re.sub(r' {2,}', ' ', _PAGE_MARKER_RE.sub(' ', line)).strip()
+        if stripped_line:
+            cleaned_lines.append(stripped_line)
+        elif cleaned_lines and cleaned_lines[-1] != '':
+            cleaned_lines.append('')
+    cleaned = '\n'.join(cleaned_lines).strip()
+    return cleaned or text.strip()
+
+
+def _truncate_at_boundary(text, tokenizer, max_tokens):
+    """Trim text to fit max_tokens cleanly at a sentence or word boundary."""
+    all_ids = tokenizer.encode(text, add_special_tokens=False)
+    if len(all_ids) <= max_tokens:
+        return text, len(all_ids)
+    decoded = tokenizer.decode(all_ids[:max_tokens], skip_special_tokens=True).rstrip()
+    boundaries = list(re.finditer(r'[.!?](?=\s|$)|\n', decoded))
+    if boundaries and boundaries[-1].end() >= len(decoded) * 0.4:
+        trimmed = decoded[:boundaries[-1].end()].strip()
+    else:
+        space_idx = decoded.rfind(' ')
+        trimmed = decoded[:space_idx].rstrip() if space_idx >= len(decoded) * 0.4 else decoded
+    final_ids = tokenizer.encode(trimmed, add_special_tokens=False)
+    return trimmed, min(len(final_ids), max_tokens)
+
+
 def build_context(docs, tokenizer, max_tokens=900):
     blocks, sources = [], []
     used = 0
     for doc in docs:
         meta = doc.get('metadata') or {}
-        text = str(doc.get('text', '')).strip()
-        if not text:
+        raw_text = str(doc.get('text', '')).strip()
+        if not raw_text:
             continue
+        text = _clean_chunk_text(raw_text)
         title = str(doc.get('source_title') or meta.get('source_title') or 'Materi KKA')[:140]
         tag = f'S{len(sources) + 1}'
-        header = f'[{tag}] {title}\n'
+        header = f'Materi ({title}):\n'
         header_ids = tokenizer.encode(header, add_special_tokens=False)
         remaining = max_tokens - used - len(header_ids) - 4
         if remaining < 24:
             break
-        text_ids = tokenizer.encode(text, add_special_tokens=False)[:remaining]
-        body = tokenizer.decode(text_ids, skip_special_tokens=True)
+        body, body_tokens = _truncate_at_boundary(text, tokenizer, remaining)
+        if not body:
+            continue
         blocks.append(header + body)
-        used += len(header_ids) + len(text_ids) + 4
+        used += len(header_ids) + body_tokens + 4
         sources.append({
             'label': tag, 'id': str(doc.get('_id', '')),
             'title': title, 'similarity': doc.get('$similarity'),

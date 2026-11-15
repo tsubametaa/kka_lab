@@ -113,7 +113,8 @@ _JUDGE_SYSTEM_PROMPT = (
 
 
 def is_auto_learn_enabled():
-    val = os.getenv('RAG_AUTO_LEARN_ENABLED', 'true').strip().lower()
+    # Default false: cegah jawaban model kecil otomatis menjadi materi kelas global tanpa audit guru.
+    val = os.getenv('RAG_AUTO_LEARN_ENABLED', 'false').strip().lower()
     return val in ('1', 'true', 'yes', 'on')
 
 

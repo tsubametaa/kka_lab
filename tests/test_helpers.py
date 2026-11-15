@@ -156,11 +156,70 @@ class Helpers(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_rows(rows + [rows[0]])
 
+        leaked_rows = [
+            dict(
+                row,
+                messages=[
+                    row['messages'][0],
+                    {
+                        'role': 'assistant',
+                        'content': (
+                            'Algoritma itu urutan langkah logis karena komputer butuh instruksi jelas [S1]. '
+                            'Misalnya resep masakan. Menurutmu apa dampaknya jika langkah dibalik?'
+                        ),
+                    },
+                ],
+            )
+            for row in rows
+        ]
+        with self.assertRaisesRegex(ValueError, 'artefak teknis'):
+            validate_rows(leaked_rows)
+
+        concise_rows = [
+            {
+                'id': f'concise-{m}',
+                'group_id': 'concise-g1',
+                'mode': m,
+                'context': 'Materi: PKTO terdiri dari Peran, Konteks, Tugas, dan Output.',
+                'sample_type': 'concise',
+                'messages': [
+                    {'role': 'user', 'content': 'Singkatnya apa kepanjangan PKTO?'},
+                    {
+                        'role': 'assistant',
+                        'content': 'PKTO adalah singkatan dari Peran, Konteks, Tugas, dan Output.',
+                    },
+                ],
+            }
+            for m in ('umum', 'terstruktur')
+        ]
+        validate_rows(concise_rows)
+
+        refusal_rows = [
+            {
+                'id': f'refusal-{m}',
+                'group_id': 'refusal-g1',
+                'mode': m,
+                'context': '',
+                'sample_type': 'refusal',
+                'messages': [
+                    {'role': 'user', 'content': 'Apa kepanjangan XYZ-99?'},
+                    {
+                        'role': 'assistant',
+                        'content': 'Istilah XYZ-99 tidak ditemukan di materi KKA saat ini; silakan konfirmasi kepada guru.',
+                    },
+                ],
+            }
+            for m in ('umum', 'terstruktur')
+        ]
+        validate_rows(refusal_rows)
+
         general = make_system('umum', 'x')
         structured = make_system('terstruktur', 'x')
         self.assertNotEqual(general, structured)
-        self.assertIn('Jangan memberikan jawaban akhir saja', general)
-        self.assertIn('200-320 kata', general)
+        self.assertIn('jangan memberikan jawaban akhir saja', general.lower())
+        self.assertIn('secara proporsional', general)
+        self.assertIn('[S1], [S2], [M1]', general)
+        self.assertNotIn('90-160 kata', general)
         self.assertIn('DILARANG membuka jawaban dengan kalimat perintah kaku', general)
         self.assertIn('contoh konkret', general)
         self.assertIn('simulasi kasus sederhana', general)
@@ -179,7 +238,8 @@ class Helpers(unittest.TestCase):
         self.assertNotEqual(general_en, structured_en)
         self.assertIn('GENERAL MODE', general_en)
         self.assertIn('STRUCTURED MODE', structured_en)
-        self.assertIn('200-320 words', general_en)
+        self.assertIn('proportionally', general_en)
+        self.assertNotIn('90-160 words', general_en)
         self.assertIn('case simulation', general_en)
         self.assertIn('Grade 10', general_en)
         self.assertIn('SOURCE CONTEXT', general_en)
@@ -365,6 +425,37 @@ class Helpers(unittest.TestCase):
             )
         self.assertIn('Pertanyaan terlalu panjang', str(ctx.exception))
         self.assertIn('batas: 50', str(ctx.exception))
+
+    def test_optimization_defaults_and_routes(self):
+        from types import SimpleNamespace
+        from app.features.chat.assistant import _resolve_local_load_options
+        from app.features.chat.router import _sse_event, router as chat_router
+        from training.train_lora import build_parser
+
+        args = build_parser().parse_args(['--data', 'd.jsonl', '--out', 'o'])
+        self.assertEqual(args.lr, 1e-4)
+        self.assertEqual(args.weight_decay, 0.05)
+        self.assertEqual(args.eval_strategy, 'steps')
+        self.assertEqual(args.eval_steps, 25)
+        self.assertEqual(args.early_stopping_patience, 3)
+
+        def _fake_torch(vram_gb, bf16):
+            return SimpleNamespace(
+                bfloat16='bf16',
+                float16='fp16',
+                cuda=SimpleNamespace(
+                    is_bf16_supported=lambda: bf16,
+                    get_device_properties=lambda _idx: SimpleNamespace(total_memory=vram_gb * (1024 ** 3)),
+                ),
+            )
+
+        self.assertEqual(_resolve_local_load_options(_fake_torch(48, True)), ('bf16', False))
+        self.assertEqual(_resolve_local_load_options(_fake_torch(8, False)), ('fp16', True))
+
+        chat_paths = [route.path for route in chat_router.routes if hasattr(route, 'path')]
+        self.assertIn('/api/chat', chat_paths)
+        self.assertIn('/api/chat/stream', chat_paths)
+        self.assertEqual(_sse_event('delta', {'text': 'hi'}), 'event: delta\ndata: {"text": "hi"}\n\n')
 
 if __name__ == '__main__':
     unittest.main()
