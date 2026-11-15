@@ -1,3 +1,5 @@
+"""Tests for app.features.chat.sanitizer (response & streaming cleanup)."""
+
 import unittest
 
 from app.features.chat.sanitizer import StreamingSanitizer, sanitize_response

@@ -1,4 +1,4 @@
-"""In-memory Astra DB Document Collection double for offline unit tests."""
+"""In-memory Astra DB Document Collection and client doubles for offline unit tests."""
 
 from copy import deepcopy
 from types import SimpleNamespace
@@ -98,3 +98,77 @@ class InMemoryAstraCollection:
         self._docs = [doc for doc in self._docs if not _matches(doc, filter)]
         return SimpleNamespace(deleted_count=before - len(self._docs))
 
+
+class FakeInsertResult:
+    """Minimal insert_many result stub exposing inserted_ids."""
+
+    def __init__(self, ids):
+        self.inserted_ids = ids
+
+
+class FakeDeleteResult:
+    """Minimal delete_many result stub exposing deleted_count."""
+
+    def __init__(self, count):
+        self.deleted_count = count
+
+
+class RecordingAstraCollection:
+    """Astra collection double that records find, insert_many, and delete_many calls."""
+
+    def __init__(self, fail_first_insert=False, delete_count=3, find_rows=None):
+        self.inserted = []
+        self.inserted_batches = []
+        self.find_filters = []
+        self.delete_filters = []
+        self.fail_first_insert = fail_first_insert
+        self.delete_count = delete_count
+        self.find_rows = (
+            find_rows
+            if find_rows is not None
+            else [
+                {
+                    '_id': 'doc_1:0000',
+                    'text': 'Materi uji',
+                    'source_title': 'Modul 1',
+                    '$similarity': 0.92,
+                }
+            ]
+        )
+
+    def find(self, query_filter=None, **kwargs):
+        self.find_filters.append(query_filter)
+        return iter(self.find_rows)
+
+    def insert_many(self, docs, **kwargs):
+        if self.fail_first_insert:
+            self.fail_first_insert = False
+            raise TimeoutError('Simulated transient network timeout')
+        batch = list(docs)
+        self.inserted.extend(batch)
+        self.inserted_batches.append(batch)
+        return FakeInsertResult([d['_id'] for d in batch])
+
+    def delete_many(self, delete_filter, **kwargs):
+        self.delete_filters.append(delete_filter)
+        return FakeDeleteResult(self.delete_count)
+
+
+class FakeDB:
+    """Minimal astrapy Database stub returning a preconfigured collection."""
+
+    def __init__(self, collection):
+        self.collection = collection
+
+    def get_collection(self, *args, **kwargs):
+        return self.collection
+
+
+class FakeClient:
+    """Minimal astrapy DataAPIClient stub returning FakeDB."""
+
+    def __init__(self, collection):
+        self.collection = collection
+
+    def get_database(self, *args, **kwargs):
+        return FakeDB(self.collection)

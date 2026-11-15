@@ -44,6 +44,15 @@ from app.features.memory import (
 )
 from app.features.memory.gate import training_quality as gate_training_quality
 from app.features.memory.store import ChatStore as memory_chat_store
+from app.features.ocr import (
+    DocumentValidationError,
+    OcrUnavailableError,
+    PageMarkdown,
+    RenderedPage,
+    clean_ocr_markdown,
+    parse_pages_to_markdown,
+    render_document_pages,
+)
 from app.features.rag import (
     DocumentChunk,
     RagUnavailableError,
@@ -56,17 +65,22 @@ from app.features.rag import (
     retrieval_query,
     retrieve,
 )
-from app.features.ocr import (
-    DocumentValidationError,
-    OcrUnavailableError,
-    PageMarkdown,
-    RenderedPage,
-    clean_ocr_markdown,
-    parse_pages_to_markdown,
-    render_document_pages,
-)
 from app.features.rag.context import retrieval_query as rag_retrieval_query
 from app.main import app, health
+
+
+def _collect_route_paths(routes):
+    """Collect route paths across both flat APIRoute lists and FastAPI _IncludedRouter wrappers."""
+    paths = []
+    for route in routes:
+        if hasattr(route, 'path'):
+            paths.append(route.path)
+        original = getattr(route, 'original_router', None)
+        if original is not None and hasattr(original, 'routes'):
+            paths.extend(_collect_route_paths(original.routes))
+        elif hasattr(route, 'routes'):
+            paths.extend(_collect_route_paths(route.routes))
+    return paths
 
 
 class ArchitectureTests(unittest.TestCase):
@@ -122,12 +136,14 @@ class ArchitectureTests(unittest.TestCase):
     def test_web_api_routes_inclusion(self):
         from app.features.chat.router import router as chat_router
         from app.features.memory.router import router as memory_router
+        from app.features.persona.router import router as persona_router
         from app.features.rag.router import router as rag_router
 
-        chat_routes = [route.path for route in chat_router.routes if hasattr(route, 'path')]
-        memory_routes = [route.path for route in memory_router.routes if hasattr(route, 'path')]
-        rag_routes = [route.path for route in rag_router.routes if hasattr(route, 'path')]
-        api_routes = [route.path for route in app.routes if hasattr(route, 'path')]
+        chat_routes = _collect_route_paths(chat_router.routes)
+        memory_routes = _collect_route_paths(memory_router.routes)
+        rag_routes = _collect_route_paths(rag_router.routes)
+        persona_routes = _collect_route_paths(persona_router.routes)
+        api_routes = _collect_route_paths(app.routes)
 
         self.assertIn('/api/health', api_routes)
         self.assertIn('/api/chat', chat_routes)
@@ -139,8 +155,6 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn('/api/rag/auto-learned', rag_routes)
         self.assertIn('/api/rag/documents/{doc_id}', rag_routes)
         self.assertIn('/api/rag/documents', api_routes)
-        from app.features.persona.router import router as persona_router
-        persona_routes = [route.path for route in persona_router.routes if hasattr(route, 'path')]
         self.assertIn('/api/users/{user_id}/persona', persona_routes)
         self.assertEqual(health(), {'status': 'ok'})
 

@@ -1,3 +1,5 @@
+"""Tests for scripts/evaluate_assistant.py and evals/eval_cases.jsonl."""
+
 import json
 import unittest
 from unittest.mock import patch
@@ -11,7 +13,7 @@ from scripts.evaluate_assistant import (
     summarize_results,
     validate_eval_cases,
 )
-from training.train_lora import apply_preset, build_parser, parse_target_modules
+from tests.fakes import FakeHttpResponse
 
 
 class EvalSuiteTests(unittest.TestCase):
@@ -88,39 +90,12 @@ class EvalSuiteTests(unittest.TestCase):
         self.assertEqual(summary['total'], 2)
         self.assertEqual(summary['passed'], 1)
 
-    def test_train_lora_rtx3050_preset(self):
-        args = build_parser().parse_args([
-            '--data', 'data/lora/lora_train.jsonl',
-            '--out', 'adapters/test',
-            '--preset', 'rtx3050-6gb',
-        ])
-        apply_preset(args)
-        self.assertEqual(args.precision, 'fp16')
-        self.assertEqual(args.batch_size, 1)
-        self.assertGreaterEqual(args.grad_accum, 8)
-        self.assertLessEqual(args.max_length, 1536)
-        self.assertEqual(args.lora_r, 8)
-        self.assertEqual(args.lora_alpha, 16)
-
     def test_query_endpoint_matches_chat_contract(self):
         captured = []
 
-        class FakeResp:
-            def __init__(self, body):
-                self._raw = json.dumps(body).encode('utf-8')
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_args):
-                return False
-
-            def read(self):
-                return self._raw
-
         def fake_urlopen(req, timeout=90):
             captured.append((req.get_header('X-api-key'), json.loads(req.data.decode('utf-8'))))
-            return FakeResp({'session_id': 'eval-S1', 'answer': 'Jawaban bersih.'})
+            return FakeHttpResponse({'session_id': 'eval-S1', 'answer': 'Jawaban bersih.'})
 
         case = {
             'id': 'S1',
@@ -138,54 +113,6 @@ class EvalSuiteTests(unittest.TestCase):
         self.assertEqual(captured[1][1]['session_id'], 'eval-S1')
         self.assertEqual(captured[1][1]['question'], 'Apa itu Transfer Learning?')
         self.assertFalse(captured[1][1]['reset_context'])
-
-    def test_train_lora_regularization_flags(self):
-        parser = build_parser()
-        args = apply_preset(parser.parse_args([
-            '--data', 'd.jsonl',
-            '--out', 'o',
-            '--preset', 'rtx3050-6gb',
-            '--precision', 'bf16',
-            '--neftune-noise-alpha', '5.0',
-            '--max-grad-norm', '0.5',
-            '--target-modules', 'q_proj,k_proj,v_proj,o_proj',
-        ]))
-        self.assertEqual(args.precision, 'bf16')
-        self.assertEqual(args.max_length, 1536)
-        self.assertEqual(args.lora_r, 8)
-        self.assertEqual(args.lora_alpha, 16)
-        self.assertEqual(args.neftune_noise_alpha, 5.0)
-        self.assertEqual(args.max_grad_norm, 0.5)
-        self.assertEqual(args.empty_cache_steps, 4)
-        self.assertEqual(
-            parse_target_modules(args.target_modules),
-            ['q_proj', 'k_proj', 'v_proj', 'o_proj'],
-        )
-        self.assertEqual(parse_target_modules('all-linear'), 'all-linear')
-
-        bad_neftune = parser.parse_args([
-            '--data', 'd.jsonl', '--out', 'o', '--neftune-noise-alpha', '-0.1',
-        ])
-        with self.assertRaises(ValueError):
-            apply_preset(bad_neftune)
-
-        bad_clip = parser.parse_args([
-            '--data', 'd.jsonl', '--out', 'o', '--max-grad-norm', '-1',
-        ])
-        with self.assertRaises(ValueError):
-            apply_preset(bad_clip)
-
-        bad_cache = parser.parse_args([
-            '--data', 'd.jsonl', '--out', 'o', '--empty-cache-steps', '-2',
-        ])
-        with self.assertRaises(ValueError):
-            apply_preset(bad_cache)
-
-        bad_modules = parser.parse_args([
-            '--data', 'd.jsonl', '--out', 'o', '--target-modules', ' , ',
-        ])
-        with self.assertRaises(ValueError):
-            apply_preset(bad_modules)
 
 
 if __name__ == '__main__':

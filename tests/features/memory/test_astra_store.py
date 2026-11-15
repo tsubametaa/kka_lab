@@ -1,3 +1,5 @@
+"""Tests for app.features.memory.astra_store (AstraChatStore persistence and concurrency)."""
+
 import threading
 import time
 import unittest
@@ -5,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from app.features.memory.astra_store import AstraChatStore
 from app.features.memory.store import ChatStore
-from tests.astra_fake import InMemoryAstraCollection
+from tests.fakes import InMemoryAstraCollection
 
 
 class AstraMemoryTests(unittest.TestCase):
@@ -43,7 +45,7 @@ class AstraMemoryTests(unittest.TestCase):
         self.assertEqual(history[3]['content'], 'a2')
 
     def test_save_exchange(self):
-        res = self.store.save_exchange(
+        self.store.save_exchange(
             user_id='student_1',
             session_id='sess_1',
             question='Apa itu dekomposisi komputasional?',
@@ -127,4 +129,3 @@ class AstraMemoryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-

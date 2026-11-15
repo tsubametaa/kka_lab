@@ -1,7 +1,10 @@
+"""Tests for app.features.language.locales (id, en, and aggregated markers)."""
+
 import unittest
 
 from app.features.language import locales
 from app.features.language.locales import en, id
+
 
 class LanguageLocaleTests(unittest.TestCase):
     def test_indonesian_definitions(self):
@@ -36,6 +39,7 @@ class LanguageLocaleTests(unittest.TestCase):
             self.assertIn(marker, locales.UNCERTAINTY_MARKERS)
         for marker in en.UNCERTAINTY_MARKERS:
             self.assertIn(marker, locales.UNCERTAINTY_MARKERS)
+
 
 if __name__ == '__main__':
     unittest.main()

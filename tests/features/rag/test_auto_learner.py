@@ -1,20 +1,18 @@
-"""Unit tests for Pilihan B guarded KKA auto-learning pipeline into Astra DB RAG."""
+"""Tests for app.features.rag.auto_learner (guarded 5-stage KKA curation & admin audit)."""
 
 import json
 import os
-import tempfile
+from types import SimpleNamespace
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import HTTPException
-from starlette.requests import Request
 
 from app.features.memory import ChatStore
-from tests.astra_fake import InMemoryAstraCollection
 from app.features.rag import (
     AUTO_LEARN_SOURCE_TITLE,
     evaluate_kka_gate,
+    is_auto_learn_enabled,
     maybe_auto_learn_from_exchange,
     parse_and_validate_distilled_note,
 )
@@ -22,64 +20,13 @@ from app.features.rag.router import (
     delete_uploaded_document,
     list_auto_learned_kka_notes,
 )
-
-
-class FakeInsertResult:
-    def __init__(self, ids):
-        self.inserted_ids = ids
-
-
-class FakeDeleteResult:
-    def __init__(self, count):
-        self.deleted_count = count
-
-
-class FakeCollection:
-    def __init__(self):
-        self.inserted = []
-        self.deleted_filters = []
-
-    def insert_many(self, docs, **kwargs):
-        batch = list(docs)
-        self.inserted.extend(batch)
-        return FakeInsertResult([d['_id'] for d in batch])
-
-    def delete_many(self, flt, **kwargs):
-        self.deleted_filters.append(flt)
-        return FakeDeleteResult(1)
-
-
-class FakeDB:
-    def __init__(self, col):
-        self.col = col
-
-    def get_collection(self, *args, **kwargs):
-        return self.col
-
-
-class FakeClient:
-    def __init__(self, col):
-        self.col = col
-
-    def get_database(self, *args, **kwargs):
-        return FakeDB(self.col)
-
-
-def _make_request(store, headers=None):
-    raw_headers = [
-        (k.lower().encode('latin-1'), v.encode('latin-1'))
-        for k, v in (headers or {}).items()
-    ]
-    state = type('State', (), {'store': store, 'assistant': None})()
-    scope = {
-        'type': 'http',
-        'method': 'GET',
-        'path': '/',
-        'headers': raw_headers,
-        'query_string': b'',
-        'app': type('App', (), {'state': state})(),
-    }
-    return Request(scope)
+from tests.fakes import (
+    FakeClient,
+    InMemoryAstraCollection,
+    RecordingAstraCollection,
+    WordTokenizer,
+    make_request,
+)
 
 
 class AutoLearnKkaTests(unittest.TestCase):
@@ -95,6 +42,13 @@ class AutoLearnKkaTests(unittest.TestCase):
 
     def tearDown(self):
         self.env_patch.stop()
+
+    def test_auto_learn_defaults_to_disabled_unless_explicitly_enabled(self):
+        env_without_flag = {k: v for k, v in os.environ.items() if k != 'RAG_AUTO_LEARN_ENABLED'}
+        with patch.dict(os.environ, env_without_flag, clear=True):
+            self.assertFalse(is_auto_learn_enabled())
+        with patch.dict(os.environ, {'RAG_AUTO_LEARN_ENABLED': 'true'}):
+            self.assertTrue(is_auto_learn_enabled())
 
     def test_rejects_non_kka_topics_poisoning_uncertainty_and_duplicates(self):
         # 1. Pelajaran di luar KKA (mis. Sejarah / Biologi) -> ditolak
@@ -144,7 +98,6 @@ class AutoLearnKkaTests(unittest.TestCase):
 
     def test_distills_neutral_kka_note_and_ingests_once_with_admin_audit(self):
         question = 'Bagaimana cara kerja algoritma K-Means pada unsupervised learning?'
-        # Simulasikan jawaban AI yang memakai gaya persona siswa ("Hmph!") + pemantik di akhir
         answer_with_persona = (
             'Hmph! Perhatikan baik-baik langkah K-Means pada unsupervised learning ini:\n'
             '1. Pilih jumlah klaster K dan tentukan titik pusat awal (centroid) pada dataset.\n'
@@ -163,16 +116,12 @@ class AutoLearnKkaTests(unittest.TestCase):
             ),
         })
 
-        class SimpleTokenizer:
-            def encode(self, text, add_special_tokens=False):
-                return text.split()
-
-        fake_assistant = type('FakeAssistant', (), {
-            'model': object(),
-            'tokenizer': SimpleTokenizer(),
-            'gpu_lock': None,
-        })()
-        col = FakeCollection()
+        fake_assistant = SimpleNamespace(
+            model=object(),
+            tokenizer=WordTokenizer(),
+            gpu_lock=None,
+        )
+        col = RecordingAstraCollection(delete_count=1)
 
         with patch('app.features.rag.auto_learner._generate_local_text', return_value=judge_json), \
              patch('app.features.rag.retriever.DataAPIClient', return_value=FakeClient(col)), \
@@ -184,7 +133,6 @@ class AutoLearnKkaTests(unittest.TestCase):
                 sources=[{'id': 'old', 'similarity': 0.51}],
                 assistant=fake_assistant,
             )
-            # Pertanyaan/topik sama diulang oleh siswa lain -> tidak masuk dua kali
             res2 = maybe_auto_learn_from_exchange(
                 self.store,
                 question=question,
@@ -203,17 +151,15 @@ class AutoLearnKkaTests(unittest.TestCase):
         self.assertEqual(doc['metadata']['scope'], 'global')
         self.assertEqual(doc['metadata']['origin'], 'auto_discussion')
         self.assertEqual(doc['text'], doc['$vectorize'])
-        # Pastikan gaya persona "Hmph!" dan pertanyaan balik sudah bersih dari materi RAG!
         self.assertNotIn('Hmph', doc['text'])
         self.assertIn('unsupervised learning', doc['text'])
 
-        # Guru dapat melihat daftar auto-learned & menghapusnya dengan X-Admin-Key
         with patch.dict(os.environ, {'RAG_ADMIN_SECRET': 'admin-kka'}):
             with self.assertRaises(HTTPException) as ctx_forbidden:
-                list_auto_learned_kka_notes(_make_request(self.store))
-            self.assertEqual(ctx_forbidden.status_code if hasattr(ctx_forbidden, 'status_code') else ctx_forbidden.exception.status_code, 403)
+                list_auto_learned_kka_notes(make_request(store=self.store))
+            self.assertEqual(ctx_forbidden.exception.status_code, 403)
 
-            admin_req = _make_request(self.store, headers={'X-Admin-Key': 'admin-kka'})
+            admin_req = make_request(store=self.store, headers={'X-Admin-Key': 'admin-kka'})
             listed = list_auto_learned_kka_notes(admin_req)
             self.assertEqual(len(listed['items']), 1)
             self.assertEqual(listed['items'][0]['doc_id'], res1['doc_id'])
@@ -227,7 +173,6 @@ class AutoLearnKkaTests(unittest.TestCase):
     def test_distiller_validator_rejects_rejected_or_off_domain_json(self):
         self.assertIsNone(parse_and_validate_distilled_note('{"approved": false}'))
         self.assertIsNone(parse_and_validate_distilled_note('bukan json'))
-        # Ringkasan di luar KKA meskipun approved=true tetap ditolak validator lapis akhir
         off_topic = json.dumps({
             'approved': True,
             'topic': 'Resep Masakan Nusantara',
@@ -241,4 +186,3 @@ class AutoLearnKkaTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
-
