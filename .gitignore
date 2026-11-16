@@ -43,3 +43,4 @@ docs/
 scripts/build_lora_dataset.py
 scripts/dataset_builder/
 
+eksperimen_v3.log
