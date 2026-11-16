@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -377,7 +378,11 @@ def main(argv=None):
         bf16=use_bf16,
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={'use_reentrant': True},
-        optim='paged_adamw_8bit',
+        optim=(
+            'adamw_bnb_8bit'
+            if os.getenv('HAISHARE_PROXY_MODE') == '1'
+            else 'paged_adamw_8bit'
+        ),
         logging_steps=5,
         eval_strategy=args.eval_strategy,
         save_strategy=args.eval_strategy,

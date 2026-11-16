@@ -1,0 +1,479 @@
+==================================================================
+[INFO] Memulai Eksperimen Dataset v3 GPU (Langkah 1 s/d Langkah 3)
+[INFO] Log live tersimpan di: ~/kka_lab/eksperimen_v3.log
+==================================================================
+
+>>> [LANGKAH 1] Memasang PyTorch (CUDA 12.8 untuk RTX 5090) & requirements-core.txt...
+Looking in indexes: https://download.pytorch.org/whl/cu128
+Collecting torch==2.7.1
+  Downloading https://download-r2.pytorch.org/whl/cu128/torch-2.7.1%2Bcu128-cp312-cp312-manylinux_2_28_x86_64.whl.metadata (29 kB)
+Collecting filelock (from torch==2.7.1)
+  Downloading filelock-4.2.4-py3-none-any.whl.metadata (2.0 kB)
+Collecting typing-extensions>=4.10.0 (from torch==2.7.1)
+  Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+Requirement already satisfied: setuptools in /usr/lib/python3/dist-packages (from torch==2.7.1) (68.1.2)
+Collecting sympy>=1.13.3 (from torch==2.7.1)
+  Downloading sympy-1.14.0-py3-none-any.whl.metadata (12 kB)
+Collecting networkx (from torch==2.7.1)
+  Downloading networkx-3.7-py3-none-any.whl.metadata (6.7 kB)
+Collecting jinja2 (from torch==2.7.1)
+  Downloading https://download.pytorch.org/whl/jinja2-3.1.6-py3-none-any.whl.metadata (2.9 kB)
+Collecting fsspec (from torch==2.7.1)
+  Downloading fsspec-2026.9.0-py3-none-any.whl.metadata (10 kB)
+Collecting nvidia-cuda-nvrtc-cu12==12.8.61 (from torch==2.7.1)
+  Downloading https://pypi.nvidia.com/nvidia-cuda-nvrtc-cu12/nvidia_cuda_nvrtc_cu12-12.8.61-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl (88.0 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 88.0/88.0 MB 115.2 MB/s eta 0:00:00
+Collecting nvidia-cuda-runtime-cu12==12.8.57 (from torch==2.7.1)
+  Downloading https://pypi.nvidia.com/nvidia-cuda-runtime-cu12/nvidia_cuda_runtime_cu12-12.8.57-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (954 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 954.8/954.8 kB 183.5 MB/s eta 0:00:00
+Collecting nvidia-cuda-cupti-cu12==12.8.57 (from torch==2.7.1)
+  Downloading https://pypi.nvidia.com/nvidia-cuda-cupti-cu12/nvidia_cuda_cupti_cu12-12.8.57-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (10.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.2/10.2 MB 128.6 MB/s eta 0:00:00
+Collecting nvidia-cudnn-cu12==9.7.1.26 (from torch==2.7.1)
+  Downloading https://pypi.nvidia.com/nvidia-cudnn-cu12/nvidia_cudnn_cu12-9.7.1.26-py3-none-manylinux_2_27_x86_64.whl (726.9 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 726.9/726.9 MB 40.9 MB/s eta 0:00:00
+Collecting nvidia-cublas-cu12==12.8.3.14 (from torch==2.7.1)
+  Downloading https://pypi.nvidia.com/nvidia-cublas-cu12/nvidia_cublas_cu12-12.8.3.14-py3-none-manylinux_2_27_x86_64.whl (609.6 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 609.6/609.6 MB 47.5 MB/s eta 0:00:00
+Collecting nvidia-cufft-cu12==11.3.3.41 (from torch==2.7.1)
+  Downloading https://pypi.nvidia.com/nvidia-cufft-cu12/nvidia_cufft_cu12-11.3.3.41-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (193.1 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 193.1/193.1 MB 73.3 MB/s eta 0:00:00
+Collecting nvidia-curand-cu12==10.3.9.55 (from torch==2.7.1)
+  Downloading https://pypi.nvidia.com/nvidia-curand-cu12/nvidia_curand_cu12-10.3.9.55-py3-none-manylinux_2_27_x86_64.whl (63.6 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 63.6/63.6 MB 117.9 MB/s eta 0:00:00
+Collecting nvidia-cusolver-cu12==11.7.2.55 (from torch==2.7.1)
+  Downloading https://pypi.nvidia.com/nvidia-cusolver-cu12/nvidia_cusolver_cu12-11.7.2.55-py3-none-manylinux_2_27_x86_64.whl (260.4 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 260.4/260.4 MB 76.2 MB/s eta 0:00:00
+Collecting nvidia-cusparse-cu12==12.5.7.53 (from torch==2.7.1)
+  Downloading https://pypi.nvidia.com/nvidia-cusparse-cu12/nvidia_cusparse_cu12-12.5.7.53-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (292.1 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 292.1/292.1 MB 76.7 MB/s eta 0:00:00
+Collecting nvidia-cusparselt-cu12==0.6.3 (from torch==2.7.1)
+  Downloading https://pypi.nvidia.com/nvidia-cusparselt-cu12/nvidia_cusparselt_cu12-0.6.3-py3-none-manylinux2014_x86_64.whl (156.8 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 156.8/156.8 MB 105.8 MB/s eta 0:00:00
+Collecting nvidia-nccl-cu12==2.26.2 (from torch==2.7.1)
+  Downloading https://pypi.nvidia.com/nvidia-nccl-cu12/nvidia_nccl_cu12-2.26.2-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (201.3 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 201.3/201.3 MB 84.4 MB/s eta 0:00:00
+Collecting nvidia-nvtx-cu12==12.8.55 (from torch==2.7.1)
+  Downloading https://pypi.nvidia.com/nvidia-nvtx-cu12/nvidia_nvtx_cu12-12.8.55-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (89 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 89.9/89.9 kB 126.6 MB/s eta 0:00:00
+Collecting nvidia-nvjitlink-cu12==12.8.61 (from torch==2.7.1)
+  Downloading https://pypi.nvidia.com/nvidia-nvjitlink-cu12/nvidia_nvjitlink_cu12-12.8.61-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl (39.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 39.2/39.2 MB 160.5 MB/s eta 0:00:00
+Collecting nvidia-cufile-cu12==1.13.0.11 (from torch==2.7.1)
+  Downloading https://pypi.nvidia.com/nvidia-cufile-cu12/nvidia_cufile_cu12-1.13.0.11-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (1.2 MB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 189.8 MB/s eta 0:00:00
+Collecting triton==3.3.1 (from torch==2.7.1)
+  Downloading https://download-r2.pytorch.org/whl/triton-3.3.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (1.5 kB)
+Collecting mpmath<1.4,>=1.1.0 (from sympy>=1.13.3->torch==2.7.1)
+  Downloading mpmath-1.3.0-py3-none-any.whl.metadata (8.6 kB)
+Collecting MarkupSafe>=2.0 (from jinja2->torch==2.7.1)
+  Downloading https://download.pytorch.org/whl/markupsafe-3.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.7 kB)
+Downloading https://download-r2.pytorch.org/whl/cu128/torch-2.7.1%2Bcu128-cp312-cp312-manylinux_2_28_x86_64.whl (1039.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.0/1.0 GB 6.2 MB/s eta 0:00:00
+Downloading https://download-r2.pytorch.org/whl/triton-3.3.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (155.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 155.7/155.7 MB 33.9 MB/s eta 0:00:00
+Downloading sympy-1.14.0-py3-none-any.whl (6.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.3/6.3 MB 47.3 MB/s eta 0:00:00
+Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 45.6/45.6 kB 18.9 MB/s eta 0:00:00
+Downloading filelock-4.2.4-py3-none-any.whl (162 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 162.5/162.5 kB 23.2 MB/s eta 0:00:00
+Downloading fsspec-2026.9.0-py3-none-any.whl (221 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 221.7/221.7 kB 69.8 MB/s eta 0:00:00
+Downloading https://download.pytorch.org/whl/jinja2-3.1.6-py3-none-any.whl (134 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 134.9/134.9 kB 54.3 MB/s eta 0:00:00
+Downloading networkx-3.7-py3-none-any.whl (2.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.1/2.1 MB 130.1 MB/s eta 0:00:00
+Downloading https://download.pytorch.org/whl/markupsafe-3.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (22 kB)
+Downloading mpmath-1.3.0-py3-none-any.whl (536 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 536.2/536.2 kB 107.4 MB/s eta 0:00:00
+Installing collected packages: nvidia-cusparselt-cu12, mpmath, typing-extensions, triton, sympy, nvidia-nvtx-cu12, nvidia-nvjitlink-cu12, nvidia-nccl-cu12, nvidia-curand-cu12, nvidia-cufile-cu12, nvidia-cuda-runtime-cu12, nvidia-cuda-nvrtc-cu12, nvidia-cuda-cupti-cu12, nvidia-cublas-cu12, networkx, MarkupSafe, fsspec, filelock, nvidia-cusparse-cu12, nvidia-cufft-cu12, nvidia-cudnn-cu12, jinja2, nvidia-cusolver-cu12, torch
+Successfully installed MarkupSafe-3.0.3 filelock-4.2.4 fsspec-2026.9.0 jinja2-3.1.6 mpmath-1.3.0 networkx-3.7 nvidia-cublas-cu12-12.8.3.14 nvidia-cuda-cupti-cu12-12.8.57 nvidia-cuda-nvrtc-cu12-12.8.61 nvidia-cuda-runtime-cu12-12.8.57 nvidia-cudnn-cu12-9.7.1.26 nvidia-cufft-cu12-11.3.3.41 nvidia-cufile-cu12-1.13.0.11 nvidia-curand-cu12-10.3.9.55 nvidia-cusolver-cu12-11.7.2.55 nvidia-cusparse-cu12-12.5.7.53 nvidia-cusparselt-cu12-0.6.3 nvidia-nccl-cu12-2.26.2 nvidia-nvjitlink-cu12-12.8.61 nvidia-nvtx-cu12-12.8.55 sympy-1.14.0 torch-2.7.1+cu128 triton-3.3.1 typing-extensions-4.16.0
+Collecting numpy (from -r requirements-core.txt (line 1))
+  Downloading numpy-2.5.5-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl.metadata (6.6 kB)
+Collecting transformers==4.57.1 (from -r requirements-core.txt (line 2))
+  Downloading transformers-4.57.1-py3-none-any.whl.metadata (43 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 44.0/44.0 kB 3.0 MB/s eta 0:00:00
+Collecting peft==0.17.1 (from -r requirements-core.txt (line 3))
+  Downloading peft-0.17.1-py3-none-any.whl.metadata (14 kB)
+Collecting accelerate==1.10.1 (from -r requirements-core.txt (line 4))
+  Downloading accelerate-1.10.1-py3-none-any.whl.metadata (19 kB)
+Collecting bitsandbytes==0.48.1 (from -r requirements-core.txt (line 5))
+  Downloading bitsandbytes-0.48.1-py3-none-manylinux_2_24_x86_64.whl.metadata (10 kB)
+Collecting astrapy==2.0.1 (from -r requirements-core.txt (line 6))
+  Downloading astrapy-2.0.1-py3-none-any.whl.metadata (23 kB)
+Collecting python-dotenv==1.1.1 (from -r requirements-core.txt (line 7))
+  Downloading python_dotenv-1.1.1-py3-none-any.whl.metadata (24 kB)
+Collecting fastapi==0.116.1 (from -r requirements-core.txt (line 8))
+  Downloading fastapi-0.116.1-py3-none-any.whl.metadata (28 kB)
+Collecting uvicorn==0.35.0 (from uvicorn[standard]==0.35.0->-r requirements-core.txt (line 9))
+  Downloading uvicorn-0.35.0-py3-none-any.whl.metadata (6.5 kB)
+Collecting httpx>=0.27.0 (from -r requirements-core.txt (line 10))
+  Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+Requirement already satisfied: filelock in /home/ubuntu/.local/lib/python3.12/site-packages (from transformers==4.57.1->-r requirements-core.txt (line 2)) (4.2.4)
+Collecting huggingface-hub<1.0,>=0.34.0 (from transformers==4.57.1->-r requirements-core.txt (line 2))
+  Downloading huggingface_hub-0.36.2-py3-none-any.whl.metadata (15 kB)
+Collecting packaging>=20.0 (from transformers==4.57.1->-r requirements-core.txt (line 2))
+  Downloading packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+Collecting pyyaml>=5.1 (from transformers==4.57.1->-r requirements-core.txt (line 2))
+  Downloading pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+Collecting regex!=2019.12.17 (from transformers==4.57.1->-r requirements-core.txt (line 2))
+  Downloading regex-2026.11.15-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (40 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 40.5/40.5 kB 10.6 MB/s eta 0:00:00
+Collecting requests (from transformers==4.57.1->-r requirements-core.txt (line 2))
+  Downloading requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+Collecting tokenizers<=0.23.0,>=0.22.0 (from transformers==4.57.1->-r requirements-core.txt (line 2))
+  Downloading tokenizers-0.22.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.3 kB)
+Collecting safetensors>=0.4.3 (from transformers==4.57.1->-r requirements-core.txt (line 2))
+  Downloading safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.2 kB)
+Collecting tqdm>=4.27 (from transformers==4.57.1->-r requirements-core.txt (line 2))
+  Downloading tqdm-4.70.1-py3-none-any.whl.metadata (57 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 57.4/57.4 kB 11.0 MB/s eta 0:00:00
+Collecting psutil (from peft==0.17.1->-r requirements-core.txt (line 3))
+  Downloading psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl.metadata (22 kB)
+Requirement already satisfied: torch>=1.13.0 in /home/ubuntu/.local/lib/python3.12/site-packages (from peft==0.17.1->-r requirements-core.txt (line 3)) (2.7.1+cu128)
+Collecting deprecation<2.2.0,>=2.1.0 (from astrapy==2.0.1->-r requirements-core.txt (line 6))
+  Downloading deprecation-2.1.0-py2.py3-none-any.whl.metadata (4.6 kB)
+Collecting pymongo>=3 (from astrapy==2.0.1->-r requirements-core.txt (line 6))
+  Downloading pymongo-4.20.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (10 kB)
+Collecting toml<0.11.0,>=0.10.2 (from astrapy==2.0.1->-r requirements-core.txt (line 6))
+  Downloading toml-0.10.2-py2.py3-none-any.whl.metadata (7.1 kB)
+Requirement already satisfied: typing-extensions>=4.0 in /home/ubuntu/.local/lib/python3.12/site-packages (from astrapy==2.0.1->-r requirements-core.txt (line 6)) (4.16.0)
+Collecting uuid6>=2024.1.12 (from astrapy==2.0.1->-r requirements-core.txt (line 6))
+  Downloading uuid6-2025.0.1-py3-none-any.whl.metadata (10 kB)
+Collecting starlette<0.48.0,>=0.40.0 (from fastapi==0.116.1->-r requirements-core.txt (line 8))
+  Downloading starlette-0.47.3-py3-none-any.whl.metadata (6.2 kB)
+Collecting pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,!=2.1.0,<3.0.0,>=1.7.4 (from fastapi==0.116.1->-r requirements-core.txt (line 8))
+  Downloading pydantic-2.14.3-py3-none-any.whl.metadata (141 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 141.5/141.5 kB 10.0 MB/s eta 0:00:00
+Collecting click>=7.0 (from uvicorn==0.35.0->uvicorn[standard]==0.35.0->-r requirements-core.txt (line 9))
+  Downloading click-8.5.1-py3-none-any.whl.metadata (2.6 kB)
+Collecting h11>=0.8 (from uvicorn==0.35.0->uvicorn[standard]==0.35.0->-r requirements-core.txt (line 9))
+  Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+Collecting httptools>=0.6.3 (from uvicorn[standard]==0.35.0->-r requirements-core.txt (line 9))
+  Downloading httptools-0.9.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (3.5 kB)
+Collecting uvloop>=0.15.1 (from uvicorn[standard]==0.35.0->-r requirements-core.txt (line 9))
+  Downloading uvloop-0.23.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (5.1 kB)
+Collecting watchfiles>=0.13 (from uvicorn[standard]==0.35.0->-r requirements-core.txt (line 9))
+  Downloading watchfiles-1.3.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.9 kB)
+Collecting websockets>=10.4 (from uvicorn[standard]==0.35.0->-r requirements-core.txt (line 9))
+  Downloading websockets-17.4-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl.metadata (6.3 kB)
+Collecting anyio (from httpx>=0.27.0->-r requirements-core.txt (line 10))
+  Downloading anyio-4.16.0-py3-none-any.whl.metadata (4.7 kB)
+Collecting certifi (from httpx>=0.27.0->-r requirements-core.txt (line 10))
+  Downloading certifi-2026.10.23-py3-none-any.whl.metadata (2.5 kB)
+Collecting httpcore==1.* (from httpx>=0.27.0->-r requirements-core.txt (line 10))
+  Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+Collecting idna (from httpx>=0.27.0->-r requirements-core.txt (line 10))
+  Downloading idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+Collecting h2<5,>=3 (from httpx[http2]<1,>=0.25.2->astrapy==2.0.1->-r requirements-core.txt (line 6))
+  Downloading h2-4.4.1-py3-none-any.whl.metadata (3.8 kB)
+Requirement already satisfied: fsspec>=2023.5.0 in /home/ubuntu/.local/lib/python3.12/site-packages (from huggingface-hub<1.0,>=0.34.0->transformers==4.57.1->-r requirements-core.txt (line 2)) (2026.9.0)
+Collecting hf-xet<2.0.0,>=1.1.3 (from huggingface-hub<1.0,>=0.34.0->transformers==4.57.1->-r requirements-core.txt (line 2))
+  Downloading hf_xet-1.8.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (4.9 kB)
+Collecting annotated-types>=0.6.0 (from pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,!=2.1.0,<3.0.0,>=1.7.4->fastapi==0.116.1->-r requirements-core.txt (line 8))
+  Downloading annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+Collecting pydantic-core==2.50.4 (from pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,!=2.1.0,<3.0.0,>=1.7.4->fastapi==0.116.1->-r requirements-core.txt (line 8))
+  Downloading pydantic_core-2.50.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (6.6 kB)
+Collecting typing-inspection>=0.4.4 (from pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,!=2.1.0,<3.0.0,>=1.7.4->fastapi==0.116.1->-r requirements-core.txt (line 8))
+  Downloading typing_inspection-0.4.5-py3-none-any.whl.metadata (2.6 kB)
+Collecting dnspython<3.0.0,>=2.7.0 (from pymongo>=3->astrapy==2.0.1->-r requirements-core.txt (line 6))
+  Downloading dnspython-2.9.2-py3-none-any.whl.metadata (5.8 kB)
+Requirement already satisfied: setuptools in /usr/lib/python3/dist-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (68.1.2)
+Requirement already satisfied: sympy>=1.13.3 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (1.14.0)
+Requirement already satisfied: networkx in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (3.7)
+Requirement already satisfied: jinja2 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (3.1.6)
+Requirement already satisfied: nvidia-cuda-nvrtc-cu12==12.8.61 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (12.8.61)
+Requirement already satisfied: nvidia-cuda-runtime-cu12==12.8.57 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (12.8.57)
+Requirement already satisfied: nvidia-cuda-cupti-cu12==12.8.57 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (12.8.57)
+Requirement already satisfied: nvidia-cudnn-cu12==9.7.1.26 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (9.7.1.26)
+Requirement already satisfied: nvidia-cublas-cu12==12.8.3.14 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (12.8.3.14)
+Requirement already satisfied: nvidia-cufft-cu12==11.3.3.41 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (11.3.3.41)
+Requirement already satisfied: nvidia-curand-cu12==10.3.9.55 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (10.3.9.55)
+Requirement already satisfied: nvidia-cusolver-cu12==11.7.2.55 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (11.7.2.55)
+Requirement already satisfied: nvidia-cusparse-cu12==12.5.7.53 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (12.5.7.53)
+Requirement already satisfied: nvidia-cusparselt-cu12==0.6.3 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (0.6.3)
+Requirement already satisfied: nvidia-nccl-cu12==2.26.2 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (2.26.2)
+Requirement already satisfied: nvidia-nvtx-cu12==12.8.55 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (12.8.55)
+Requirement already satisfied: nvidia-nvjitlink-cu12==12.8.61 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (12.8.61)
+Requirement already satisfied: nvidia-cufile-cu12==1.13.0.11 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (1.13.0.11)
+Requirement already satisfied: triton==3.3.1 in /home/ubuntu/.local/lib/python3.12/site-packages (from torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (3.3.1)
+Collecting charset_normalizer<4,>=2 (from requests->transformers==4.57.1->-r requirements-core.txt (line 2))
+  Downloading charset_normalizer-3.5.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (46 kB)
+     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 46.4/46.4 kB 18.2 MB/s eta 0:00:00
+Collecting urllib3<3,>=1.26 (from requests->transformers==4.57.1->-r requirements-core.txt (line 2))
+  Downloading urllib3-2.8.0-py3-none-any.whl.metadata (7.4 kB)
+Collecting hyperframe<7,>=6.1 (from h2<5,>=3->httpx[http2]<1,>=0.25.2->astrapy==2.0.1->-r requirements-core.txt (line 6))
+  Downloading hyperframe-6.1.0-py3-none-any.whl.metadata (4.3 kB)
+Collecting hpack<5,>=4.2 (from h2<5,>=3->httpx[http2]<1,>=0.25.2->astrapy==2.0.1->-r requirements-core.txt (line 6))
+  Downloading hpack-4.2.0-py3-none-any.whl.metadata (3.3 kB)
+Requirement already satisfied: mpmath<1.4,>=1.1.0 in /home/ubuntu/.local/lib/python3.12/site-packages (from sympy>=1.13.3->torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (1.3.0)
+Requirement already satisfied: MarkupSafe>=2.0 in /home/ubuntu/.local/lib/python3.12/site-packages (from jinja2->torch>=1.13.0->peft==0.17.1->-r requirements-core.txt (line 3)) (3.0.3)
+Downloading transformers-4.57.1-py3-none-any.whl (12.0 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 12.0/12.0 MB 113.8 MB/s eta 0:00:00
+Downloading peft-0.17.1-py3-none-any.whl (504 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 504.9/504.9 kB 103.2 MB/s eta 0:00:00
+Downloading accelerate-1.10.1-py3-none-any.whl (374 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 374.9/374.9 kB 89.0 MB/s eta 0:00:00
+Downloading bitsandbytes-0.48.1-py3-none-manylinux_2_24_x86_64.whl (60.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 60.1/60.1 MB 45.2 MB/s eta 0:00:00
+Downloading astrapy-2.0.1-py3-none-any.whl (300 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 300.5/300.5 kB 23.8 MB/s eta 0:00:00
+Downloading python_dotenv-1.1.1-py3-none-any.whl (20 kB)
+Downloading fastapi-0.116.1-py3-none-any.whl (95 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 95.6/95.6 kB 22.3 MB/s eta 0:00:00
+Downloading uvicorn-0.35.0-py3-none-any.whl (66 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 66.4/66.4 kB 28.0 MB/s eta 0:00:00
+Downloading numpy-2.5.5-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl (15.7 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 15.7/15.7 MB 116.6 MB/s eta 0:00:00
+Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.5/73.5 kB 28.9 MB/s eta 0:00:00
+Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 78.8/78.8 kB 32.8 MB/s eta 0:00:00
+Downloading click-8.5.1-py3-none-any.whl (126 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 126.2/126.2 kB 47.8 MB/s eta 0:00:00
+Downloading deprecation-2.1.0-py2.py3-none-any.whl (11 kB)
+Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+Downloading httptools-0.9.0-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (552 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 552.8/552.8 kB 56.5 MB/s eta 0:00:00
+Downloading huggingface_hub-0.36.2-py3-none-any.whl (566 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 566.4/566.4 kB 81.0 MB/s eta 0:00:00
+Downloading packaging-26.3-py3-none-any.whl (129 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 130.0/130.0 kB 24.1 MB/s eta 0:00:00
+Downloading pydantic-2.14.3-py3-none-any.whl (494 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 494.1/494.1 kB 104.0 MB/s eta 0:00:00
+Downloading pydantic_core-2.50.4-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (2.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.3/2.3 MB 72.4 MB/s eta 0:00:00
+Downloading pymongo-4.20.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (1.1 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.1/1.1 MB 74.9 MB/s eta 0:00:00
+Downloading pyyaml-6.0.3-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (807 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 807.9/807.9 kB 62.7 MB/s eta 0:00:00
+Downloading regex-2026.11.15-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (809 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 809.2/809.2 kB 108.4 MB/s eta 0:00:00
+Downloading safetensors-0.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (516 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 516.0/516.0 kB 101.0 MB/s eta 0:00:00
+Downloading starlette-0.47.3-py3-none-any.whl (72 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.0/73.0 kB 26.8 MB/s eta 0:00:00
+Downloading anyio-4.16.0-py3-none-any.whl (134 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 134.5/134.5 kB 22.6 MB/s eta 0:00:00
+Downloading idna-3.20-py3-none-any.whl (69 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 69.6/69.6 kB 13.4 MB/s eta 0:00:00
+Downloading tokenizers-0.22.2-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (3.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 3.3/3.3 MB 69.2 MB/s eta 0:00:00
+Downloading toml-0.10.2-py2.py3-none-any.whl (16 kB)
+Downloading tqdm-4.70.1-py3-none-any.whl (80 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 80.2/80.2 kB 13.4 MB/s eta 0:00:00
+Downloading uuid6-2025.0.1-py3-none-any.whl (7.0 kB)
+Downloading uvloop-0.23.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (4.5 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.5/4.5 MB 75.3 MB/s eta 0:00:00
+Downloading watchfiles-1.3.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (458 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 458.4/458.4 kB 96.6 MB/s eta 0:00:00
+Downloading websockets-17.4-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl (226 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 226.3/226.3 kB 59.6 MB/s eta 0:00:00
+Downloading certifi-2026.10.23-py3-none-any.whl (135 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 135.1/135.1 kB 53.4 MB/s eta 0:00:00
+Downloading psutil-7.2.2-cp36-abi3-manylinux2010_x86_64.manylinux_2_12_x86_64.manylinux_2_28_x86_64.whl (155 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 155.6/155.6 kB 57.8 MB/s eta 0:00:00
+Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 73.1/73.1 kB 27.9 MB/s eta 0:00:00
+Downloading annotated_types-0.8.0-py3-none-any.whl (13 kB)
+Downloading charset_normalizer-3.5.2-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (257 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 257.6/257.6 kB 36.6 MB/s eta 0:00:00
+Downloading dnspython-2.9.2-py3-none-any.whl (360 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 360.5/360.5 kB 86.8 MB/s eta 0:00:00
+Downloading h2-4.4.1-py3-none-any.whl (62 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 62.6/62.6 kB 27.9 MB/s eta 0:00:00
+Downloading hf_xet-1.8.0-cp38-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (4.3 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.3/4.3 MB 138.0 MB/s eta 0:00:00
+Downloading typing_inspection-0.4.5-py3-none-any.whl (14 kB)
+Downloading urllib3-2.8.0-py3-none-any.whl (135 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 135.7/135.7 kB 49.0 MB/s eta 0:00:00
+Downloading hpack-4.2.0-py3-none-any.whl (34 kB)
+Downloading hyperframe-6.1.0-py3-none-any.whl (13 kB)
+Installing collected packages: websockets, uvloop, uuid6, urllib3, typing-inspection, tqdm, toml, safetensors, regex, pyyaml, python-dotenv, pydantic-core, psutil, packaging, numpy, idna, hyperframe, httptools, hpack, hf-xet, h11, dnspython, click, charset_normalizer, certifi, annotated-types, uvicorn, requests, pymongo, pydantic, httpcore, h2, deprecation, anyio, watchfiles, starlette, huggingface-hub, httpx, tokenizers, fastapi, bitsandbytes, accelerate, transformers, astrapy, peft
+Successfully installed accelerate-1.10.1 annotated-types-0.8.0 anyio-4.16.0 astrapy-2.0.1 bitsandbytes-0.48.1 certifi-2026.10.23 charset_normalizer-3.5.2 click-8.5.1 deprecation-2.1.0 dnspython-2.9.2 fastapi-0.116.1 h11-0.16.0 h2-4.4.1 hf-xet-1.8.0 hpack-4.2.0 httpcore-1.0.9 httptools-0.9.0 httpx-0.28.1 huggingface-hub-0.36.2 hyperframe-6.1.0 idna-3.20 numpy-2.5.5 packaging-26.3 peft-0.17.1 psutil-7.2.2 pydantic-2.14.3 pydantic-core-2.50.4 pymongo-4.20.0 python-dotenv-1.1.1 pyyaml-6.0.3 regex-2026.11.15 requests-2.34.2 safetensors-0.8.0 starlette-0.47.3 tokenizers-0.22.2 toml-0.10.2 tqdm-4.70.1 transformers-4.57.1 typing-inspection-0.4.5 urllib3-2.8.0 uuid6-2025.0.1 uvicorn-0.35.0 uvloop-0.23.0 watchfiles-1.3.0 websockets-17.4
+
+>>> [LANGKAH 1] Cek GPU Cloud & versi PyTorch:
+NVIDIA GeForce RTX 5090 | VRAM (GB): 31.4 | Torch: 2.7.1+cu128 | bf16: True
+
+>>> [LANGKAH 1] Verifikasi unit test:
+test_chat_feature_exports (architecture.test_architecture.ArchitectureTests.test_chat_feature_exports) ... ok
+test_core_exports (architecture.test_architecture.ArchitectureTests.test_core_exports) ... ok
+test_dataset_feature_exports (architecture.test_architecture.ArchitectureTests.test_dataset_feature_exports) ... ok
+test_language_feature_exports (architecture.test_architecture.ArchitectureTests.test_language_feature_exports) ... ok
+test_memory_feature_exports (architecture.test_architecture.ArchitectureTests.test_memory_feature_exports) ... ok
+test_ocr_feature_exports (architecture.test_architecture.ArchitectureTests.test_ocr_feature_exports) ... ok
+test_rag_feature_exports (architecture.test_architecture.ArchitectureTests.test_rag_feature_exports) ... ok
+test_web_api_routes_inclusion (architecture.test_architecture.ArchitectureTests.test_web_api_routes_inclusion) ... ok
+test_eval_cases_jsonl_schema_and_balance (evaluation.test_evaluate_assistant.EvalSuiteTests.test_eval_cases_jsonl_schema_and_balance) ... ok
+test_offline_check_and_summarize (evaluation.test_evaluate_assistant.EvalSuiteTests.test_offline_check_and_summarize) ... ok
+test_query_endpoint_matches_chat_contract (evaluation.test_evaluate_assistant.EvalSuiteTests.test_query_endpoint_matches_chat_contract) ... ok
+test_scorer_flags_leaks_and_topic_drift (evaluation.test_evaluate_assistant.EvalSuiteTests.test_scorer_flags_leaks_and_topic_drift) ... ok
+test_scorer_requires_honest_limitation_when_expected (evaluation.test_evaluate_assistant.EvalSuiteTests.test_scorer_requires_honest_limitation_when_expected) ... ok
+test_resolve_local_load_options_selects_bf16_or_4bit_by_vram (features.chat.test_assistant.ChatAssistantTests.test_resolve_local_load_options_selects_bf16_or_4bit_by_vram) ... ok
+test_build_generation_kwargs_sampling_and_greedy (features.chat.test_prompts.ChatPromptsTests.test_build_generation_kwargs_sampling_and_greedy) ... ok
+test_fit_messages_to_budget_middle_truncates_ultra_long_user_prompt (features.chat.test_prompts.ChatPromptsTests.test_fit_messages_to_budget_middle_truncates_ultra_long_user_prompt) ... ok
+test_fit_messages_to_budget_normal (features.chat.test_prompts.ChatPromptsTests.test_fit_messages_to_budget_normal) ... ok
+test_fit_messages_to_budget_prunes_history_and_context (features.chat.test_prompts.ChatPromptsTests.test_fit_messages_to_budget_prunes_history_and_context) ... ok
+test_fit_messages_to_budget_raises_when_prompt_exceeds_entire_budget (features.chat.test_prompts.ChatPromptsTests.test_fit_messages_to_budget_raises_when_prompt_exceeds_entire_budget) ... ok
+test_make_system_modes_and_bilingual_rules (features.chat.test_prompts.ChatPromptsTests.test_make_system_modes_and_bilingual_rules) ... ok
+test_resolve_max_prompt_tokens_auto_maximum (features.chat.test_prompts.ChatPromptsTests.test_resolve_max_prompt_tokens_auto_maximum) ... ok
+test_chat_routes_and_sse_event_format (features.chat.test_router.ChatRouterTests.test_chat_routes_and_sse_event_format) ... ok
+test_preserves_python_indexing_and_fenced_code_blocks (features.chat.test_sanitizer.SanitizerTests.test_preserves_python_indexing_and_fenced_code_blocks) ... ok
+test_preserves_space_after_inline_backticks (features.chat.test_sanitizer.SanitizerTests.test_preserves_space_after_inline_backticks) ... ok
+test_streaming_sanitizer_handles_split_tags_metadata_and_code (features.chat.test_sanitizer.SanitizerTests.test_streaming_sanitizer_handles_split_tags_metadata_and_code) ... ok
+test_strips_citations_metadata_raw_ids_and_special_tokens (features.chat.test_sanitizer.SanitizerTests.test_strips_citations_metadata_raw_ids_and_special_tokens) ... ok
+test_grouped_split (features.dataset.test_tokenizer.DatasetTokenizerTests.test_grouped_split) ... ok
+test_target_mask (features.dataset.test_tokenizer.DatasetTokenizerTests.test_target_mask) ... ok
+test_accepts_concise_and_refusal_sample_types (features.dataset.test_validator.DatasetValidatorTests.test_accepts_concise_and_refusal_sample_types) ... ok
+test_accepts_valid_paired_lesson_rows (features.dataset.test_validator.DatasetValidatorTests.test_accepts_valid_paired_lesson_rows) ... ok
+test_rejects_duplicate_ids_and_artifact_leaks (features.dataset.test_validator.DatasetValidatorTests.test_rejects_duplicate_ids_and_artifact_leaks) ... ok
+test_rejects_stiff_openers_short_answers_and_missing_pedagogy_elements (features.dataset.test_validator.DatasetValidatorTests.test_rejects_stiff_openers_short_answers_and_missing_pedagogy_elements) ... ok
+test_detect_english_queries_including_indonesian_acronyms (features.language.test_detector.LanguageDetectorTests.test_detect_english_queries_including_indonesian_acronyms) ... ok
+test_detect_indonesian_queries_including_english_tech_terms (features.language.test_detector.LanguageDetectorTests.test_detect_indonesian_queries_including_english_tech_terms) ... ok
+test_explicit_language_request_override (features.language.test_detector.LanguageDetectorTests.test_explicit_language_request_override) ... ok
+test_format_user_message_adds_transient_reminder_once (features.language.test_detector.LanguageDetectorTests.test_format_user_message_adds_transient_reminder_once) ... ok
+test_history_fallback_and_language_switching (features.language.test_detector.LanguageDetectorTests.test_history_fallback_and_language_switching) ... ok
+test_is_wrong_language_detects_mismatched_responses (features.language.test_detector.LanguageDetectorTests.test_is_wrong_language_detects_mismatched_responses) ... ok
+test_aggregated_definitions (features.language.test_locales.LanguageLocaleTests.test_aggregated_definitions) ... ok
+test_english_definitions (features.language.test_locales.LanguageLocaleTests.test_english_definitions) ... ok
+test_indonesian_definitions (features.language.test_locales.LanguageLocaleTests.test_indonesian_definitions) ... ok
+test_bilingual_queries_condenses_very_long_prompt (features.language.test_translator.LanguageTranslatorTests.test_bilingual_queries_condenses_very_long_prompt) ... ok
+test_ensure_response_language_rewrites_only_when_needed (features.language.test_translator.LanguageTranslatorTests.test_ensure_response_language_rewrites_only_when_needed) ... ok
+test_invalid_translation_falls_back_to_original (features.language.test_translator.LanguageTranslatorTests.test_invalid_translation_falls_back_to_original) ... ok
+test_parse_bilingual_queries (features.language.test_translator.LanguageTranslatorTests.test_parse_bilingual_queries) ... ok
+test_parse_code_fenced_json_and_remove_duplicates (features.language.test_translator.LanguageTranslatorTests.test_parse_code_fenced_json_and_remove_duplicates) ... ok
+test_chat_store_pure_astradb_rag_and_user_delete (features.memory.test_astra_store.AstraMemoryTests.test_chat_store_pure_astradb_rag_and_user_delete) ... ok
+test_collection_lazy_init_is_thread_safe (features.memory.test_astra_store.AstraMemoryTests.test_collection_lazy_init_is_thread_safe) ... ok
+test_create_session (features.memory.test_astra_store.AstraMemoryTests.test_create_session) ... ok
+test_history_ordering (features.memory.test_astra_store.AstraMemoryTests.test_history_ordering) ... ok
+test_save_exchange (features.memory.test_astra_store.AstraMemoryTests.test_save_exchange) ... ok
+test_save_knowledge_and_persona_use_upsert (features.memory.test_astra_store.AstraMemoryTests.test_save_knowledge_and_persona_use_upsert) ... ok
+test_session_belongs_to (features.memory.test_astra_store.AstraMemoryTests.test_session_belongs_to) ... ok
+test_personal_knowledge_retrieval_and_isolation (features.memory.test_chat_store.ChatStoreTests.test_personal_knowledge_retrieval_and_isolation) ... ok
+test_repeated_question_is_private_to_user (features.memory.test_chat_store.ChatStoreTests.test_repeated_question_is_private_to_user) ... ok
+test_session_history_and_delete (features.memory.test_chat_store.ChatStoreTests.test_session_history_and_delete) ... ok
+test_normalization_ignores_case_and_punctuation (features.memory.test_training_gate.TrainingGateTests.test_normalization_ignores_case_and_punctuation) ... ok
+test_training_gate_needs_consent_and_clear_answer (features.memory.test_training_gate.TrainingGateTests.test_training_gate_needs_consent_and_clear_answer) ... ok
+test_vllm_ocr_client_and_markdown_cleaner (features.ocr.test_client.OcrClientTests.test_vllm_ocr_client_and_markdown_cleaner) ... ok
+test_validate_upload_metadata_rejects_invalid_extension_empty_and_oversized (features.ocr.test_pdf_renderer.OcrUploadValidationTests.test_validate_upload_metadata_rejects_invalid_extension_empty_and_oversized) ... ok
+test_no_persona_keeps_prompt_unchanged (features.persona.test_prompt_and_store.PersonaPromptTests.test_no_persona_keeps_prompt_unchanged) ... ok
+test_persona_block_wrapped_and_rules_follow (features.persona.test_prompt_and_store.PersonaPromptTests.test_persona_block_wrapped_and_rules_follow) ... ok
+test_student_name_block_sanitized_and_optional (features.persona.test_prompt_and_store.PersonaPromptTests.test_student_name_block_sanitized_and_optional) ... ok
+test_save_get_update_delete_and_isolation (features.persona.test_prompt_and_store.PersonaStoreTests.test_save_get_update_delete_and_isolation) ... ok
+test_length_and_tag_escape (features.persona.test_validator.PersonaValidationTests.test_length_and_tag_escape) ... ok
+test_no_false_positive_on_substrings (features.persona.test_validator.PersonaValidationTests.test_no_false_positive_on_substrings) ... ok
+test_rejects_inappropriate_style (features.persona.test_validator.PersonaValidationTests.test_rejects_inappropriate_style) ... ok
+test_rejects_pedagogy_bypass (features.persona.test_validator.PersonaValidationTests.test_rejects_pedagogy_bypass) ... ok
+test_rejects_prompt_injection (features.persona.test_validator.PersonaValidationTests.test_rejects_prompt_injection) ... ok
+test_tsundere_persona_is_allowed (features.persona.test_validator.PersonaValidationTests.test_tsundere_persona_is_allowed) ... ok
+test_auto_learn_defaults_to_disabled_unless_explicitly_enabled (features.rag.test_auto_learner.AutoLearnKkaTests.test_auto_learn_defaults_to_disabled_unless_explicitly_enabled) ... ok
+test_distiller_validator_rejects_rejected_or_off_domain_json (features.rag.test_auto_learner.AutoLearnKkaTests.test_distiller_validator_rejects_rejected_or_off_domain_json) ... ok
+test_distills_neutral_kka_note_and_ingests_once_with_admin_audit (features.rag.test_auto_learner.AutoLearnKkaTests.test_distills_neutral_kka_note_and_ingests_once_with_admin_audit) ... ok
+test_rejects_non_kka_topics_poisoning_uncertainty_and_duplicates (features.rag.test_auto_learner.AutoLearnKkaTests.test_rejects_non_kka_topics_poisoning_uncertainty_and_duplicates) ... ok
+test_markdown_chunker_preserves_headings_tables_math_and_pages (features.rag.test_chunker.RagChunkerTests.test_markdown_chunker_preserves_headings_tables_math_and_pages) ... ok
+test_build_context_strips_metadata_headers_and_truncates_at_sentence (features.rag.test_context.RagContextTests.test_build_context_strips_metadata_headers_and_truncates_at_sentence) ... ok
+test_build_context_strips_page_markers_while_keeping_template_placeholders (features.rag.test_context.RagContextTests.test_build_context_strips_page_markers_while_keeping_template_placeholders) ... ok
+test_filter_relevant_history_drops_stale_topic_on_switch (features.rag.test_context.RagContextTests.test_filter_relevant_history_drops_stale_topic_on_switch) ... ok
+test_retrieval_query_and_topic_resolution (features.rag.test_context.RagContextTests.test_retrieval_query_and_topic_resolution) ... ok
+test_ingest_sets_both_text_and_vectorize_with_retry (features.rag.test_ingestor.RagIngestorTests.test_ingest_sets_both_text_and_vectorize_with_retry) ... ok
+test_auth_401_does_not_retry (features.rag.test_retriever.RagRetrieverTests.test_auth_401_does_not_retry) ... ok
+test_deduplicates_and_ranks_bilingual_queries (features.rag.test_retriever.RagRetrieverTests.test_deduplicates_and_ranks_bilingual_queries) ... ok
+test_persistent_503_raises_rag_unavailable_with_hibernation_hint (features.rag.test_retriever.RagRetrieverTests.test_persistent_503_raises_rag_unavailable_with_hibernation_hint) ... ok
+test_retries_transient_503_on_lazy_cursor_and_recovers (features.rag.test_retriever.RagRetrieverTests.test_retries_transient_503_on_lazy_cursor_and_recovers) ... ok
+test_retrieve_condenses_very_long_query_keeping_head_and_tail (features.rag.test_retriever.RagRetrieverTests.test_retrieve_condenses_very_long_query_keeping_head_and_tail) ... ok
+test_retrieve_filters_docs_below_min_similarity (features.rag.test_retriever.RagRetrieverTests.test_retrieve_filters_docs_below_min_similarity) ... ok
+test_retrieve_respects_env_and_disable_threshold (features.rag.test_retriever.RagRetrieverTests.test_retrieve_respects_env_and_disable_threshold) ... ok
+test_scope_filter_isolates_private_student_documents (features.rag.test_retriever.RagRetrieverTests.test_scope_filter_isolates_private_student_documents) ... ok
+test_end_to_end_ingestion_pipeline_cleans_staging (features.rag.test_router.RagRouterTests.test_end_to_end_ingestion_pipeline_cleans_staging) ... ok
+test_router_enforces_global_admin_guard_and_user_ownership (features.rag.test_router.RagRouterTests.test_router_enforces_global_admin_guard_and_user_ownership) ... ok
+test_default_optimization_args (lora_training.test_train_lora.TrainLoraCliTests.test_default_optimization_args) ... ok
+test_regularization_flags_and_validation (lora_training.test_train_lora.TrainLoraCliTests.test_regularization_flags_and_validation) ... ok
+test_rtx3050_preset (lora_training.test_train_lora.TrainLoraCliTests.test_rtx3050_preset) ... ok
+
+----------------------------------------------------------------------
+Ran 93 tests in 0.102s
+
+OK
+
+>>> [LANGKAH 1] Verifikasi keutuhan Dataset v3:
+{
+  "eval_cases": {
+    "total_cases": 40,
+    "dimensions": [
+      "akurat",
+      "bersih",
+      "fokus",
+      "proporsional",
+      "tuntas"
+    ]
+  },
+  "lora_audit": {
+    "lora_train.jsonl": {
+      "rows": 760,
+      "tag_leaks": 0,
+      "metadata_leaks": 0,
+      "has_question_pct": 62.1,
+      "min_words": 9,
+      "max_words": 183,
+      "over_160_words": 2,
+      "under_50_words": 307
+    },
+    "lora_val.jsonl": {
+      "rows": 172,
+      "tag_leaks": 0,
+      "metadata_leaks": 0,
+      "has_question_pct": 60.5,
+      "min_words": 14,
+      "max_words": 176,
+      "over_160_words": 1,
+      "under_50_words": 78
+    },
+    "lora_test.jsonl": {
+      "rows": 162,
+      "tag_leaks": 0,
+      "metadata_leaks": 0,
+      "has_question_pct": 59.3,
+      "min_words": 14,
+      "max_words": 145,
+      "over_160_words": 0,
+      "under_50_words": 75
+    }
+  }
+}
+
+==================================================================
+>>> [LANGKAH 2.1] Mengunduh Qwen/Qwen2.5-3B-Instruct & kunci model_record.json...
+==================================================================
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files:  73%|███████▎  | 8/11 [00:00<00:00, 17.37it/s]Fetching 11 files: 100%|██████████| 11/11 [00:14<00:00,  1.30s/it]
+Model diunduh ke cache Hugging Face.
+Simpan model_record.json dan gunakan juga saat training.
+{
+  "model_id": "Qwen/Qwen2.5-3B-Instruct",
+  "revision": "aa8e72537993ba99e69dfaafa59ed015b17504d1"
+}
+
+==================================================================
+>>> [LANGKAH 2.2] Training QLoRA Dataset v3 pada Qwen/Qwen2.5-3B-Instruct...
+==================================================================
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:04<00:04,  4.87s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:07<00:00,  3.67s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:07<00:00,  3.85s/it]
+trainable params: 29,933,568 || all params: 3,115,872,256 || trainable%: 0.9607
+  0%|          | 0/380 [00:00<?, ?it/s]Error invalid argument at line 720 in file /src/csrc/pythonInterface.cpp
+
+==================================================================
+>>> [LANGKAH 2.1] Mengunduh Qwen/Qwen2.5-3B-Instruct & kunci model_record.json...
+==================================================================
+Fetching 11 files:   0%|          | 0/11 [00:00<?, ?it/s]Fetching 11 files: 100%|██████████| 11/11 [00:00<00:00, 3404.97it/s]
+Model diunduh ke cache Hugging Face.
+Simpan model_record.json dan gunakan juga saat training.
+{
+  "model_id": "Qwen/Qwen2.5-3B-Instruct",
+  "revision": "aa8e72537993ba99e69dfaafa59ed015b17504d1"
+}
+
+==================================================================
+>>> [LANGKAH 2.2] Training QLoRA Dataset v3 pada Qwen/Qwen2.5-3B-Instruct...
+==================================================================
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:04<00:04,  4.83s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:07<00:00,  3.68s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:07<00:00,  3.85s/it]
+trainable params: 29,933,568 || all params: 3,115,872,256 || trainable%: 0.9607
+  0%|          | 0/380 [00:00<?, ?it/s]  0%|          | 1/380 [00:04<25:47,  4.08s/it]  1%|          | 2/380 [00:06<20:30,  3.25s/it]  1%|          | 3/380 [00:09<18:10,  2.89s/it]  1%|          | 4/380 [00:11<17:26,  2.78s/it]
