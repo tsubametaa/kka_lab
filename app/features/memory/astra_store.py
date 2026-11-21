@@ -384,3 +384,49 @@ class AstraChatStore:
                 {'type': 'ingestion_job', 'scope': 'user'},
             ],
         }))
+
+    def list_chat_exchanges(self, *, user_id=None, session_id=None, limit=50):
+        safe_limit = max(1, min(int(limit), 200))
+        filt = {'type': 'exchange'}
+        if user_id:
+            filt['user_id'] = str(user_id).strip()
+        if session_id:
+            filt['session_id'] = str(session_id).strip()
+        docs = _call_with_retry(lambda: list(self.collection.find(
+            filt,
+            projection={
+                '_id': True, 'user_id': True, 'session_id': True,
+                'question': True, 'answer': True, 'mode': True,
+                'sources': True, 'training_status': True,
+                'created_at': True, 'timestamp': True,
+            },
+            sort={'timestamp': -1},
+            limit=safe_limit,
+        )))
+        docs.sort(key=lambda d: d.get('timestamp') or d.get('created_at') or '', reverse=True)
+        out = []
+        for row in docs[:safe_limit]:
+            item = self._clean_doc(row)
+            item['exchange_id'] = row.get('_id', '')
+            out.append(item)
+        return out
+
+    def delete_session_data(self, session_id):
+        clean_sid = str(session_id or '').strip()
+        if not clean_sid:
+            return 0
+        res = _call_with_retry(lambda: self.collection.delete_many({
+            'session_id': clean_sid,
+            'type': {'$in': ['session', 'exchange']},
+        }))
+        return int(getattr(res, 'deleted_count', 0) or 0)
+
+    def delete_exchange_record(self, exchange_id):
+        clean_id = str(exchange_id or '').strip()
+        if not clean_id:
+            return 0
+        res = _call_with_retry(lambda: self.collection.delete_one({
+            '_id': clean_id,
+            'type': 'exchange',
+        }))
+        return int(getattr(res, 'deleted_count', 0) or 0)
