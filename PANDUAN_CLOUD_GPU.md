@@ -366,7 +366,7 @@ curl "https://ai.domainanda.com/api/rag/jobs/9f8c1d2e-...?user_id=siswa_101" \
 curl "https://ai.domainanda.com/api/users/siswa_101/documents" \
   -H "X-API-Key: isi-kunci-rahasia-internal-anda"
 
-# Hapus dokumen tertentu dari Astra DB & SQLite
+# Hapus dokumen tertentu dari Astra DB
 curl -X DELETE "https://ai.domainanda.com/api/rag/documents/doc_a1b2c3d4e5f60718?user_id=siswa_101" \
   -H "X-API-Key: isi-kunci-rahasia-internal-anda"
 

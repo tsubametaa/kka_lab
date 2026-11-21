@@ -76,6 +76,14 @@ class DatasetValidatorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'pemantik berpikir'):
             validate_rows(no_prompt_rows)
 
+        jump_question_rows = _paired_rows(
+            'AI bisa membedakan gambar ikan dan ayam karena adanya pelatihan data dan labeling data. '
+            'Misalnya komputer mempelajari ratusan contoh foto ayam dan ikan yang sudah diberi nama kategori. '
+            'Apakah kamu tahu apa itu labeling dan bagaimana cara kerja nya?'
+        )
+        with self.assertRaisesRegex(ValueError, 'terlalu loncat/sulit sekaligus'):
+            validate_rows(jump_question_rows)
+
     def test_rejects_duplicate_ids_and_artifact_leaks(self):
         valid_rows = _paired_rows(
             'Algoritma itu urutan langkah logis untuk menyelesaikan masalah karena komputer butuh instruksi jelas. '

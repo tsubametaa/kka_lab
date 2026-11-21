@@ -30,10 +30,6 @@ data/uploads/
 exports/
 *.lock.txt
 
-# Local databases
-*.sqlite3
-data/*.sqlite3
-
 # Research documents & drafts
 docs/
 *.docx

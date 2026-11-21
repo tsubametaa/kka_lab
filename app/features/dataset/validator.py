@@ -17,6 +17,12 @@ _ARTIFACT_LEAK_RE = re.compile(
     r'|\bauto_kka_[0-9a-f]{6,}\b',
     flags=re.IGNORECASE | re.MULTILINE,
 )
+_UNSTRUCTURED_JUMP_QUESTION_RE = re.compile(
+    r'(?:apakah\s+kamu\s+tahu|tahukah\s+kamu|kamu\s+tahu\s+(?:tidak|nggak|gak))\s+'
+    r'apa\s+itu\s+[^?.!]+\s+dan\s+(?:bagaimana|gimana)\s+cara\s+kerja\s*(?:nya)?\s*\?'
+    r'|\bdo\s+you\s+know\s+what\s+[^?.!]+\s+is\s+and\s+how\s+it\s+works\s*\?',
+    flags=re.IGNORECASE,
+)
 
 _REASONING_MARKERS = (
     'karena', 'sebab', 'soalnya', 'maka', 'sehingga', 'supaya', 'agar',
@@ -33,8 +39,9 @@ _THINKING_MARKERS = (
     'menurutmu', 'mengapa', 'kenapa', 'alasan', 'jelaskan', 'bandingkan',
     'perkirakan', 'prediksi', 'buktikan', 'apa', 'apakah', 'siapa',
     'bagaimana', 'mana', 'manakah', 'coba', 'kira', 'kalau', 'jika',
+    'ciri', 'langkah', 'perhatikan', 'lihat', 'bedanya',
     'why', 'what', 'how', 'compare', 'predict', 'justify', 'explain',
-    'which', 'who', 'when', 'where', 'suppose',
+    'which', 'who', 'when', 'where', 'suppose', 'notice', 'feature', 'step',
 )
 _LIMITATION_MARKERS = (
     'tidak ditemukan', 'tidak ada di materi', 'tidak tercantum', 'di luar materi',
@@ -103,6 +110,11 @@ def _validate_pedagogical_target(answer, row_id, mode='umum', sample_type='lesso
                 f'Jawaban target {row_id} (mode umum) harus memuat contoh konkret atau analogi.'
             )
 
+    if _UNSTRUCTURED_JUMP_QUESTION_RE.search(stripped):
+        raise ValueError(
+            f'Pertanyaan pedagogis {row_id} terlalu loncat/sulit sekaligus; '
+            'pancing bertahap dari pertanyaan dasar yang mudah dulu.'
+        )
     need_question = (sample_type == 'lesson') if require_question is None else require_question
     if need_question:
         if '?' not in stripped or not any(marker in words for marker in _THINKING_MARKERS):

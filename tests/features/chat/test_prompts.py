@@ -28,7 +28,10 @@ class ChatPromptsTests(unittest.TestCase):
         self.assertIn('contoh konkret', general)
         self.assertIn('simulasi kasus sederhana', general)
         self.assertIn('SMA/SMK kelas X', general)
+        self.assertIn('langkah demi langkah', general)
+        self.assertIn('memantik rasa penasaran', general)
         self.assertIn('Jangan berikan solusi lengkap pada giliran awal', structured)
+        self.assertIn('tanpa melompati satu langkah pun', structured)
 
         personal = make_system('umum', 'x', '[M1] catatan')
         self.assertIn('belum terverifikasi', personal)
