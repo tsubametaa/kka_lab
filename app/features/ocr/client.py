@@ -22,6 +22,8 @@ TRANSIENT_HTTP_CODES = {429, 500, 502, 503, 504}
 _EOS_TOKENS_RE = re.compile(
     r'(<｜end▁of▁sentence｜>|<\|end_of_sentence\|>|<\|endoftext\|>|<\|im_end\|>)'
 )
+_DET_TAG_RE = re.compile(r'<\|det\|>[^<\n]*<\|/det\|>')
+_REF_TAG_RE = re.compile(r'</?\|ref\|>')
 _OUTER_FENCE_RE = re.compile(r'^\s*```(?:markdown|md)?\s*\n(.*?)\n```\s*$', re.DOTALL)
 
 _transformers_lock = threading.Lock()
@@ -36,6 +38,8 @@ class PageMarkdown:
 def clean_ocr_markdown(raw_text):
     text = str(raw_text or '')
     text = _EOS_TOKENS_RE.sub('', text)
+    text = _DET_TAG_RE.sub('', text)
+    text = _REF_TAG_RE.sub('', text)
     if text.lstrip().startswith('<image>'):
         text = text.lstrip()[len('<image>'):]
     fenced = _OUTER_FENCE_RE.match(text)
@@ -61,12 +65,14 @@ def _parse_page_via_vllm(image_path, *, base_url, model_id, api_key, prompt,
         'messages': [{
             'role': 'user',
             'content': [
-                {'type': 'image_url', 'image_url': {'url': data_url}},
                 {'type': 'text', 'text': prompt},
+                {'type': 'image_url', 'image_url': {'url': data_url}},
             ],
         }],
         'temperature': 0.0,
         'max_tokens': max_tokens,
+        'skip_special_tokens': False,
+        'vllm_xargs': {'no_repeat_ngram_size': 35},
     }).encode('utf-8')
 
     headers = {'Content-Type': 'application/json'}
