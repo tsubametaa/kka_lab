@@ -19,7 +19,6 @@ class FakeHttpError(Exception):
         super().__init__(message)
         self.response = FakeResponse(status_code)
 
-
 class FailingCursor:
     """Meniru astrapy FindCursor yang baru melempar error saat diiterasi."""
 
@@ -31,7 +30,6 @@ class FailingCursor:
 
     def __next__(self):
         raise self.exc
-
 
 class SequencedCollection:
     def __init__(self, side_effects):
@@ -48,7 +46,6 @@ class SequencedCollection:
         if isinstance(effect, Exception):
             return FailingCursor(effect)
         return iter(effect)
-
 
 class RagRetrieverTests(unittest.TestCase):
     def setUp(self):
@@ -180,6 +177,63 @@ class RagRetrieverTests(unittest.TestCase):
              patch('app.features.rag.retriever.load_dotenv'):
             retrieve('Apa itu overfitting?', user_id='siswa-1', retries=0, backoff=0)
         self.assertEqual(col.find_filters[0], student_filter)
+
+    def test_retrieve_for_chat_prioritizes_user_doc_on_explicit_reference(self):
+        from app.features.rag import retrieve_for_chat
+
+        class DualScopeCollection:
+            def find(self, query_filter=None, **kwargs):
+                sort_arg = kwargs.get('sort') or {}
+                if '$vectorize' not in sort_arg:
+                    return iter([
+                        {
+                            '_id': 'doc_u1:0000',
+                            'text': 'Isi file siswa halaman 1 tentang AI.',
+                            'source_title': 'Tugas Siswa.pdf',
+                            'metadata': {'scope': 'user', 'doc_id': 'doc_u1', 'chunk_index': 0},
+                        },
+                        {
+                            '_id': 'doc_u1:0001',
+                            'text': 'Isi file siswa halaman 2 tentang etika.',
+                            'source_title': 'Tugas Siswa.pdf',
+                            'metadata': {'scope': 'user', 'doc_id': 'doc_u1', 'chunk_index': 1},
+                        },
+                    ])
+                if query_filter.get('metadata.scope') == 'user':
+                    return iter([
+                        {
+                            '_id': 'doc_u1:0000',
+                            'text': 'Isi file siswa halaman 1 tentang AI.',
+                            'source_title': 'Tugas Siswa.pdf',
+                            'metadata': {'scope': 'user', 'doc_id': 'doc_u1', 'chunk_index': 0},
+                            '$similarity': 0.55,
+                        }
+                    ])
+                return iter([
+                    {
+                        '_id': 'global_1',
+                        'text': 'Materi buku global KKA.',
+                        'source_title': 'Buku KKA',
+                        'metadata': {'scope': 'global'},
+                        '$similarity': 0.85,
+                    }
+                ])
+
+        col = DualScopeCollection()
+        with patch('app.features.rag.retriever.DataAPIClient', return_value=FakeClient(col)), \
+             patch('app.features.rag.retriever.load_dotenv'):
+            docs = retrieve_for_chat(
+                ['ringkas pdf yang saya upload'],
+                user_id='siswa-1',
+                latest_doc_id='doc_u1',
+                explicit_doc_ref=True,
+                retries=0,
+                backoff=0,
+            )
+        self.assertGreaterEqual(len(docs), 2)
+        self.assertEqual(docs[0]['_id'], 'doc_u1:0000')
+        self.assertEqual(docs[1]['_id'], 'doc_u1:0001')
+        self.assertTrue(all((d.get('metadata') or {}).get('scope') == 'user' for d in docs))
 
 
 if __name__ == '__main__':

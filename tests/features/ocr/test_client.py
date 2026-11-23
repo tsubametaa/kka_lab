@@ -49,6 +49,32 @@ class OcrClientTests(unittest.TestCase):
         with self.assertRaises(DocumentValidationError):
             parse_pages_to_markdown(rendered, backend='native_pdf')
 
+    def test_structured_text_bypasses_vllm_and_cleaner_strips_det_and_loops(self):
+        noisy = (
+            '<|det|>image [0, 0, 999, 999]\n'
+            'Isi materi asli.\n'
+            '[Non-Text] [Non-Text] [Non-Text] [Non-Text]\n'
+            '1. 2. 3. 4. 5. 6. 7. 8. 9. 10. 11. 12.\n'
+            'M. A. K. A. H. A. H. A. H. A.\n'
+            'Baris ulang\nBaris ulang\nBaris ulang\nBaris ulang'
+        )
+        cleaned = clean_ocr_markdown(noisy)
+        self.assertNotIn('<|det|>', cleaned)
+        self.assertNotIn('[Non-Text]', cleaned)
+        self.assertNotIn('11. 12.', cleaned)
+        self.assertNotIn('M. A. K.', cleaned)
+        self.assertEqual(cleaned.count('Baris ulang'), 2)
+        self.assertIn('Isi materi asli.', cleaned)
+
+        structured_page = RenderedPage(
+            page_number=1, image_path=None,
+            native_text='# Judul DOCX\n\nKonten terstruktur.', is_structured_text=True,
+        )
+        with patch('urllib.request.urlopen') as mock_open:
+            out = parse_pages_to_markdown([structured_page], backend='vllm')
+        mock_open.assert_not_called()
+        self.assertEqual(out[0].markdown, '# Judul DOCX\n\nKonten terstruktur.')
+
 
 if __name__ == '__main__':
     unittest.main()

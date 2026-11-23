@@ -268,6 +268,30 @@ def _truncate_at_boundary(text, tokenizer, max_tokens):
     return trimmed, min(len(final_ids), max_tokens)
 
 
+_DOC_REF_RE = re.compile(
+    r'\b(?:pdf|docx?|html?|file|berkas|dokumen|lampiran|unggah(?:an)?|upload(?:ed)?|kirim(?:an)?'
+    r'|ringkas(?:an)?|rangkum(?:an)?|summarize|summary|attachment|attached)\b',
+    re.IGNORECASE,
+)
+
+
+def is_document_reference_query(question, user_docs=None):
+    """Detect whether the student is referring to their uploaded document."""
+    text = (question or '').strip()
+    if not text:
+        return False
+    if _DOC_REF_RE.search(text):
+        return True
+    lower = text.lower()
+    for doc in user_docs or ():
+        for field in ('source_title', 'filename'):
+            val = str(doc.get(field) or '').strip().lower()
+            stem = val.rsplit('.', 1)[0] if '.' in val else val
+            if len(stem) >= 4 and stem in lower:
+                return True
+    return False
+
+
 def build_context(docs, tokenizer, max_tokens=900):
     blocks, sources = [], []
     used = 0
@@ -279,7 +303,8 @@ def build_context(docs, tokenizer, max_tokens=900):
         text = _clean_chunk_text(raw_text)
         title = str(doc.get('source_title') or meta.get('source_title') or 'Materi KKA')[:140]
         tag = f'S{len(sources) + 1}'
-        header = f'Materi ({title}):\n'
+        is_user_doc = meta.get('scope') == 'user'
+        header = f'Materi Unggahan Siswa ({title}):\n' if is_user_doc else f'Materi ({title}):\n'
         header_ids = tokenizer.encode(header, add_special_tokens=False)
         remaining = max_tokens - used - len(header_ids) - 4
         if remaining < 24:
@@ -293,5 +318,6 @@ def build_context(docs, tokenizer, max_tokens=900):
             'label': tag, 'id': str(doc.get('_id', '')),
             'title': title, 'similarity': doc.get('$similarity'),
             'pages_pdf': doc.get('pages_pdf') or meta.get('pages_pdf'),
+            'scope': 'user' if is_user_doc else (meta.get('scope') or 'global'),
         })
     return '\n\n'.join(blocks), sources

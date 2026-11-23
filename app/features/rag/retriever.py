@@ -111,21 +111,21 @@ def _fetch_query_docs(collection, query, top_k, retries=2, backoff=1.5, query_fi
                 f'Gagal mengambil konteks dari Astra DB: {exc}'
             ) from exc
 
-def retrieve(question, top_k=3, retries=2, backoff=1.5, user_id=None, min_similarity=None):
-    collection = get_astra_collection()
-    scope_filter = build_scope_filter(user_id)
+def _condense_queries(question):
     queries = [question] if isinstance(question, str) else question
-    queries = list(dict.fromkeys(query.strip() for query in queries if query.strip()))
-    documents = {}
-    for query in queries:
-        if len(query) > 1000:
-            search_text = f'{query[:500].rstrip()}\n{query[-500:].lstrip()}'
+    cleaned = list(dict.fromkeys(q.strip() for q in queries if isinstance(q, str) and q.strip()))
+    condensed = []
+    for q in cleaned:
+        if len(q) > 1000:
+            condensed.append(f'{q[:500].rstrip()}\n{q[-500:].lstrip()}')
         else:
-            search_text = query.strip()
-        results = _fetch_query_docs(
-            collection, search_text, top_k, retries=retries, backoff=backoff,
-            query_filter=scope_filter,
-        )
+            condensed.append(q)
+    return condensed
+
+
+def _rank_and_filter_docs(doc_batches, *, min_similarity=None):
+    documents = {}
+    for results in doc_batches:
         for doc in results:
             key = str(doc.get('_id') or (doc.get('source_title'), doc.get('text')))
             current = documents.get(key)
@@ -150,5 +150,123 @@ def retrieve(question, top_k=3, retries=2, backoff=1.5, user_id=None, min_simila
             if not isinstance(doc.get('$similarity'), (int, float))
             or doc['$similarity'] >= threshold
         ]
-    return ranked[:top_k]
+    return ranked
+
+
+def retrieve(question, top_k=3, retries=2, backoff=1.5, user_id=None, min_similarity=None):
+    collection = get_astra_collection()
+    scope_filter = build_scope_filter(user_id)
+    queries = _condense_queries(question)
+    batches = [
+        _fetch_query_docs(
+            collection, search_text, top_k, retries=retries, backoff=backoff,
+            query_filter=scope_filter,
+        )
+        for search_text in queries
+    ]
+    return _rank_and_filter_docs(batches, min_similarity=min_similarity)[:top_k]
+
+
+def fetch_user_document_chunks(user_id, *, doc_id=None, limit=8, retries=2, backoff=1.5):
+    """Fetch chunks of a student's uploaded document in reading order (chunk_index)."""
+    clean_user = (user_id or '').strip()
+    if not clean_user:
+        return []
+    collection = get_astra_collection()
+    filt = {'metadata.scope': 'user', 'metadata.uploaded_by': clean_user}
+    if doc_id:
+        filt['metadata.doc_id'] = str(doc_id).strip()
+
+    for attempt in range(retries + 1):
+        try:
+            cursor = collection.find(
+                filt,
+                limit=max(20, int(limit) * 3),
+                projection={
+                    '_id': True, 'text': True, 'source_title': True,
+                    'topic': True, 'pages_pdf': True, 'metadata': True,
+                },
+            )
+            docs = list(cursor)
+            break
+        except Exception as exc:
+            if _is_transient_error(exc) and attempt < retries:
+                if backoff > 0:
+                    time.sleep(backoff * (2 ** attempt))
+                continue
+            return []
+
+    docs.sort(
+        key=lambda d: (
+            (d.get('metadata') or {}).get('chunk_index', 0),
+            (d.get('metadata') or {}).get('sub_index', 0),
+            str(d.get('_id', '')),
+        )
+    )
+    return docs[:limit]
+
+
+def retrieve_for_chat(question, *, user_id=None, latest_doc_id=None, explicit_doc_ref=False,
+                      top_k=5, user_top_k=5, retries=2, backoff=1.5, min_similarity=None):
+    """Retrieve user-uploaded documents with priority alongside global KKA material."""
+    clean_user = (user_id or '').strip()
+    if not clean_user:
+        return retrieve(
+            question, top_k=top_k, retries=retries, backoff=backoff, min_similarity=min_similarity
+        )
+
+    collection = get_astra_collection()
+    queries = _condense_queries(question)
+    threshold = get_min_similarity(min_similarity)
+
+    user_filter = {'metadata.scope': 'user', 'metadata.uploaded_by': clean_user}
+    if latest_doc_id and explicit_doc_ref:
+        user_filter['metadata.doc_id'] = str(latest_doc_id).strip()
+
+    user_batches = [
+        _fetch_query_docs(
+            collection, q, max(user_top_k, 4), retries=retries, backoff=backoff,
+            query_filter=user_filter,
+        )
+        for q in queries
+    ]
+    user_floor = 0.0 if explicit_doc_ref else (min(threshold, 0.48) if threshold > 0 else 0.0)
+    user_hits = _rank_and_filter_docs(user_batches, min_similarity=user_floor)[:user_top_k]
+
+    if explicit_doc_ref or len(user_hits) < 2:
+        ordered_docs = fetch_user_document_chunks(
+            clean_user, doc_id=latest_doc_id, limit=max(user_top_k, 6),
+            retries=retries, backoff=backoff,
+        )
+        seen_ids = {str(d.get('_id', '')) for d in user_hits}
+        for doc in ordered_docs:
+            key = str(doc.get('_id', ''))
+            if key not in seen_ids:
+                user_hits.append(doc)
+                seen_ids.add(key)
+            if len(user_hits) >= user_top_k:
+                break
+
+    if explicit_doc_ref and user_hits:
+        return user_hits[:max(top_k, user_top_k)]
+
+    global_filter = build_scope_filter(None)
+    global_limit = min(3, top_k)
+    global_batches = [
+        _fetch_query_docs(
+            collection, q, global_limit, retries=retries, backoff=backoff,
+            query_filter=global_filter,
+        )
+        for q in queries
+    ]
+    global_hits = _rank_and_filter_docs(global_batches, min_similarity=min_similarity)[:global_limit]
+
+    merged = []
+    seen = set()
+    for doc in [*user_hits, *global_hits]:
+        key = str(doc.get('_id') or (doc.get('source_title'), doc.get('text')))
+        if key not in seen:
+            merged.append(doc)
+            seen.add(key)
+    return merged[:max(top_k, len(user_hits) + 1)]
 

@@ -1,8 +1,10 @@
 """Astra DB vectorize document ingestion and scoped cleanup."""
 
+import re
 import time
 from datetime import datetime, timezone
 
+from app.features.rag.chunker import _estimate_embed_tokens
 from app.features.rag.exceptions import RagUnavailableError
 from app.features.rag.retriever import (
     _http_status_code,
@@ -12,6 +14,67 @@ from app.features.rag.retriever import (
 
 VALID_SCOPES = ('user', 'global')
 DEFAULT_INSERT_BATCH = 20
+MAX_VECTORIZE_CHARS = 1100
+MAX_VECTORIZE_EST_TOKENS = 340
+
+
+def _split_text_for_embedding(text, *, max_chars=MAX_VECTORIZE_CHARS, max_est_tokens=MAX_VECTORIZE_EST_TOKENS):
+    """Ensure every document's $vectorize payload safely fits within NVIDIA E5 512-token cap."""
+    clean = (text or '').strip()
+    if not clean:
+        return []
+    if len(clean) <= max_chars and _estimate_embed_tokens(clean) <= max_est_tokens:
+        return [clean]
+
+    words = clean.split()
+    parts = []
+    cur = []
+    for word in words:
+        # Handle ultra-long unbroken tokens (e.g. URLs/base64).
+        if len(word) > max_chars or _estimate_embed_tokens(word) > max_est_tokens:
+            if cur:
+                parts.append(' '.join(cur))
+                cur = []
+            step = max(80, min(max_chars // 2, max_est_tokens * 2))
+            for i in range(0, len(word), step):
+                parts.append(word[i:i + step])
+            continue
+        candidate = ' '.join([*cur, word]) if cur else word
+        if cur and (len(candidate) > max_chars or _estimate_embed_tokens(candidate) > max_est_tokens):
+            parts.append(' '.join(cur))
+            cur = [word]
+        else:
+            cur.append(word)
+    if cur:
+        parts.append(' '.join(cur))
+    return parts or [clean[:max_chars]]
+
+
+def _is_embedding_token_limit_error(exc):
+    msg = str(exc).lower()
+    return 'exceeds maximum allowed token size' in msg or 'token size 512' in msg
+
+
+def _halve_doc(doc):
+    text = (doc.get('$vectorize') or doc.get('text') or '').strip()
+    words = text.split()
+    if len(words) >= 2:
+        mid = len(words) // 2
+        halves = [' '.join(words[:mid]).strip(), ' '.join(words[mid:]).strip()]
+    elif len(text) >= 2:
+        mid = len(text) // 2
+        halves = [text[:mid].strip(), text[mid:].strip()]
+    else:
+        return [doc]
+
+    out = []
+    for sub_idx, part in enumerate(h for h in halves if h):
+        cloned = dict(doc)
+        cloned['_id'] = f"{doc['_id']}_s{sub_idx}"
+        cloned['text'] = part
+        cloned['$vectorize'] = part
+        out.append(cloned)
+    return out or [doc]
 
 
 def _call_with_astra_retry(fn, *, action_label, retries=2, backoff=1.5):
@@ -63,25 +126,65 @@ def build_astra_documents(chunks, *, doc_id, source_title, user_id, scope='user'
         text = (chunk.text or '').strip()
         if not text:
             continue
-        meta = {
-            **(extra_metadata or {}),
-            'doc_id': clean_doc_id,
-            'scope': scope,
-            'uploaded_by': clean_user,
-            'chunk_index': chunk.index,
-            'filename': (filename or '').strip()[:200],
-            'created_at': timestamp,
-        }
-        docs.append({
-            '_id': f'{clean_doc_id}:{chunk.index:04d}',
-            'text': text,
-            '$vectorize': text,
-            'source_title': title,
-            'topic': (chunk.topic or default_topic or 'Materi Tambahan').strip()[:140],
-            'pages_pdf': chunk.pages_pdf,
-            'metadata': meta,
-        })
+        pieces = _split_text_for_embedding(text)
+        for sub_idx, piece in enumerate(pieces):
+            doc_key = (
+                f'{clean_doc_id}:{chunk.index:04d}'
+                if len(pieces) == 1
+                else f'{clean_doc_id}:{chunk.index:04d}_{sub_idx:02d}'
+            )
+            meta = {
+                **(extra_metadata or {}),
+                'doc_id': clean_doc_id,
+                'scope': scope,
+                'uploaded_by': clean_user,
+                'chunk_index': chunk.index,
+                'sub_index': sub_idx,
+                'filename': (filename or '').strip()[:200],
+                'created_at': timestamp,
+            }
+            docs.append({
+                '_id': doc_key,
+                'text': piece,
+                '$vectorize': piece,
+                'source_title': title,
+                'topic': (chunk.topic or default_topic or 'Materi Tambahan').strip()[:140],
+                'pages_pdf': chunk.pages_pdf,
+                'metadata': meta,
+            })
     return docs
+
+
+def _insert_batch_resilient(collection, batch, *, retries, backoff, depth=0):
+    """Insert a batch into Astra DB, auto-splitting docs if provider rejects >512 tokens."""
+    try:
+        result = _call_with_astra_retry(
+            lambda b=batch: collection.insert_many(b, ordered=True),
+            action_label='menyimpan chunk materi',
+            retries=retries,
+            backoff=backoff,
+        )
+        inserted_ids = getattr(result, 'inserted_ids', None)
+        return len(inserted_ids) if inserted_ids is not None else len(batch)
+    except RagUnavailableError as exc:
+        if not _is_embedding_token_limit_error(exc) or depth >= 4:
+            raise
+        if len(batch) > 1:
+            total = 0
+            for item in batch:
+                total += _insert_batch_resilient(
+                    collection, [item], retries=retries, backoff=backoff, depth=depth
+                )
+            return total
+        split_docs = _halve_doc(batch[0])
+        if len(split_docs) <= 1:
+            raise
+        total = 0
+        for item in split_docs:
+            total += _insert_batch_resilient(
+                collection, [item], retries=retries, backoff=backoff, depth=depth + 1
+            )
+        return total
 
 
 def ingest_chunks(chunks, *, doc_id, source_title, user_id, scope='user',
@@ -103,16 +206,19 @@ def ingest_chunks(chunks, *, doc_id, source_title, user_id, scope='user',
     collection = get_astra_collection()
     step = max(1, int(batch_size))
     inserted = 0
-    for start in range(0, len(docs), step):
-        batch = docs[start:start + step]
-        result = _call_with_astra_retry(
-            lambda b=batch: collection.insert_many(b, ordered=False),
-            action_label='menyimpan chunk materi',
-            retries=retries,
-            backoff=backoff,
-        )
-        inserted_ids = getattr(result, 'inserted_ids', None)
-        inserted += len(inserted_ids) if inserted_ids is not None else len(batch)
+    try:
+        for start in range(0, len(docs), step):
+            batch = docs[start:start + step]
+            inserted += _insert_batch_resilient(
+                collection, batch, retries=retries, backoff=backoff
+            )
+    except Exception:
+        if inserted > 0:
+            try:
+                delete_document_chunks(doc_id, user_id=user_id, is_admin=(scope == 'global'), retries=1, backoff=0)
+            except Exception:
+                pass
+        raise
     return inserted
 
 

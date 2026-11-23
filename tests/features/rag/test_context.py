@@ -124,6 +124,30 @@ class RagContextTests(unittest.TestCase):
         self.assertIn('risiko', merged_query.lower())
         self.assertIn(reply, merged_query)
 
+    def test_user_uploaded_doc_header_and_document_reference_detection(self):
+        from app.features.rag import is_document_reference_query
+
+        tok = WordTokenizer()
+        docs = [
+            {
+                '_id': 'doc_u1:0000',
+                'source_title': 'Makalah KKA',
+                'metadata': {'scope': 'user'},
+                'text': 'Isi makalah siswa tentang etika kecerdasan artifisial.',
+            }
+        ]
+        ctx, sources = build_context(docs, tok, max_tokens=100)
+        self.assertIn('Materi Unggahan Siswa (Makalah KKA):', ctx)
+        self.assertEqual(sources[0]['scope'], 'user')
+        self.assertTrue(is_document_reference_query('Tolong ringkas pdf yang saya kirim'))
+        self.assertTrue(
+            is_document_reference_query(
+                'Jelaskan isi Makalah KKA dong',
+                user_docs=[{'source_title': 'Makalah KKA', 'filename': 'makalah.docx'}],
+            )
+        )
+        self.assertFalse(is_document_reference_query('Apa itu supervised learning?'))
+
 
 if __name__ == '__main__':
     unittest.main()

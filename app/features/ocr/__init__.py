@@ -9,6 +9,7 @@ from app.features.ocr.client import (
 )
 from app.features.ocr.exceptions import DocumentValidationError, OcrUnavailableError
 from app.features.ocr.pdf_renderer import (
+    SUPPORTED_DOCUMENT_SUFFIXES,
     SUPPORTED_IMAGE_SUFFIXES,
     SUPPORTED_SUFFIXES,
     RenderedPage,
@@ -25,6 +26,7 @@ __all__ = [
     'OcrUnavailableError',
     'PageMarkdown',
     'RenderedPage',
+    'SUPPORTED_DOCUMENT_SUFFIXES',
     'SUPPORTED_IMAGE_SUFFIXES',
     'SUPPORTED_SUFFIXES',
     'clean_ocr_markdown',

@@ -52,6 +52,57 @@ class RagIngestorTests(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertEqual(len(col.inserted_batches), 1)
 
+    def test_ingest_splits_long_chunk_and_retries_on_512_token_error(self):
+        from app.features.rag import DocumentChunk
+
+        huge_chunk = DocumentChunk(
+            index=0,
+            text=' '.join([f'kata{i}' for i in range(500)]),
+            topic='Materi',
+            pages_pdf=1,
+        )
+        docs = build_astra_documents(
+            [huge_chunk],
+            doc_id='doc_big',
+            source_title='Besar',
+            user_id='siswa-1',
+            scope='user',
+        )
+        self.assertGreater(len(docs), 1)
+        for d in docs:
+            self.assertLessEqual(len(d['$vectorize']), 1100)
+
+        class RejectLongOnceCollection(RecordingAstraCollection):
+            def __init__(self):
+                super().__init__()
+                self.rejected = False
+
+            def insert_many(self, batch, **kwargs):
+                if not self.rejected and any(len(d['$vectorize']) > 200 for d in batch):
+                    self.rejected = True
+                    raise RuntimeError('Input length 600 exceeds maximum allowed token size 512')
+                return super().insert_many(batch, **kwargs)
+
+        col = RejectLongOnceCollection()
+        medium_chunk = DocumentChunk(
+            index=0,
+            text=' '.join(['materi'] * 80),
+            topic='Materi',
+            pages_pdf=1,
+        )
+        with patch('app.features.rag.retriever.DataAPIClient', return_value=FakeClient(col)), \
+             patch('app.features.rag.retriever.load_dotenv'):
+            count = ingest_chunks(
+                [medium_chunk],
+                doc_id='doc_split',
+                source_title='Split',
+                user_id='siswa-1',
+                scope='user',
+                retries=0,
+                backoff=0,
+            )
+        self.assertGreaterEqual(count, 2)
+
 
 if __name__ == '__main__':
     unittest.main()

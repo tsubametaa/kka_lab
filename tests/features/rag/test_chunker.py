@@ -41,6 +41,17 @@ class RagChunkerTests(unittest.TestCase):
                 all_pages.add(c.pages_pdf)
         self.assertEqual(all_pages, {1, 2})
 
+    def test_oversized_single_line_or_numeric_list_respects_embedding_limit(self):
+        long_numbers = ' '.join(f'{i}.' for i in range(1, 600))
+        long_unbroken = 'x' * 2500
+        pages = [
+            PageMarkdown(page_number=1, markdown=f'# Data\n\n{long_numbers}\n\n{long_unbroken}'),
+        ]
+        chunks = chunk_markdown_pages(pages)
+        self.assertGreater(len(chunks), 3)
+        for c in chunks:
+            self.assertLessEqual(len(c.text), 1150)
+
 
 if __name__ == '__main__':
     unittest.main()

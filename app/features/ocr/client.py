@@ -22,8 +22,12 @@ TRANSIENT_HTTP_CODES = {429, 500, 502, 503, 504}
 _EOS_TOKENS_RE = re.compile(
     r'(<｜end▁of▁sentence｜>|<\|end_of_sentence\|>|<\|endoftext\|>|<\|im_end\|>)'
 )
-_DET_TAG_RE = re.compile(r'<\|det\|>[^<\n]*<\|/det\|>')
+_DET_TAG_RE = re.compile(r'<\|det\|>[^\n]*(?:<\|/det\|>)?')
 _REF_TAG_RE = re.compile(r'</?\|ref\|>')
+_NON_TEXT_SPAM_RE = re.compile(r'(?:\[Non-Text\]\s*){3,}', re.IGNORECASE)
+_SEQ_NUMBERS_RE = re.compile(r'^(?:\d+\.?\s+){10,}\d*\.?$')
+_SPACED_LETTERS_RE = re.compile(r'(?:[A-Za-z]\.\s+){8,}[A-Za-z]\.?')
+_BOX_NOISE_RE = re.compile(r'(?:[■□▪▫●◦]\s*){6,}')
 _OUTER_FENCE_RE = re.compile(r'^\s*```(?:markdown|md)?\s*\n(.*?)\n```\s*$', re.DOTALL)
 
 _transformers_lock = threading.Lock()
@@ -34,6 +38,36 @@ _transformers_bundle = None
 class PageMarkdown:
     page_number: int
     markdown: str
+
+
+def _collapse_ocr_noise(text: str) -> str:
+    """Remove pathological OCR repetition loops while preserving legitimate text."""
+    text = _NON_TEXT_SPAM_RE.sub('', text)
+    text = _BOX_NOISE_RE.sub('', text)
+    text = _SPACED_LETTERS_RE.sub('', text)
+
+    cleaned_lines = []
+    prev_norm = None
+    repeat_count = 0
+    for line in text.split('\n'):
+        stripped = line.strip()
+        if stripped and _SEQ_NUMBERS_RE.match(stripped):
+            continue
+        if stripped:
+            norm = re.sub(r'\s+', ' ', stripped)
+            if norm == prev_norm:
+                repeat_count += 1
+                if repeat_count >= 2:
+                    continue
+            else:
+                prev_norm = norm
+                repeat_count = 0
+        else:
+            prev_norm = None
+            repeat_count = 0
+        cleaned_lines.append(line)
+    return '\n'.join(cleaned_lines)
+
 
 def clean_ocr_markdown(raw_text):
     text = str(raw_text or '')
@@ -46,6 +80,7 @@ def clean_ocr_markdown(raw_text):
     if fenced and '```' not in fenced.group(1):
         text = fenced.group(1)
     text = text.replace('\r\n', '\n').replace('\r', '\n')
+    text = _collapse_ocr_noise(text)
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
@@ -191,25 +226,44 @@ def parse_pages_to_markdown(pages, *, backend=None, work_dir=None):
     prompt = os.getenv('OCR_PROMPT', DEFAULT_OCR_PROMPT).strip() or DEFAULT_OCR_PROMPT
 
     if mode == 'transformers':
-        parsed = _parse_via_transformers(
-            pages, model_id=model_id, prompt=prompt, work_dir=work_dir
+        structured = {
+            p.page_number: clean_ocr_markdown(p.native_text)
+            for p in pages
+            if getattr(p, 'is_structured_text', False) and (p.native_text or '').strip()
+        }
+        img_pages = [p for p in pages if p.page_number not in structured and p.image_path is not None]
+        ocr_parsed = (
+            _parse_via_transformers(img_pages, model_id=model_id, prompt=prompt, work_dir=work_dir)
+            if img_pages
+            else []
         )
+        ocr_map = {p.page_number: p.markdown for p in ocr_parsed}
+        parsed = []
+        for page in pages:
+            md = structured.get(page.page_number) or ocr_map.get(page.page_number, '')
+            if md:
+                parsed.append(PageMarkdown(page_number=page.page_number, markdown=md))
     else:
         base_url = os.getenv('OCR_BASE_URL', DEFAULT_OCR_BASE_URL).strip() or DEFAULT_OCR_BASE_URL
         api_key = os.getenv('OCR_API_KEY', '').strip()
-        max_tokens = int(os.getenv('OCR_MAX_TOKENS', '4096'))
+        max_tokens = int(os.getenv('OCR_MAX_TOKENS', '2048'))
         timeout = float(os.getenv('OCR_TIMEOUT_SECONDS', '180'))
         parsed = []
         for page in pages:
-            md = _parse_page_via_vllm(
-                page.image_path,
-                base_url=base_url,
-                model_id=model_id,
-                api_key=api_key,
-                prompt=prompt,
-                max_tokens=max_tokens,
-                timeout=timeout,
-            )
+            if getattr(page, 'is_structured_text', False) and (page.native_text or '').strip():
+                md = clean_ocr_markdown(page.native_text)
+            elif page.image_path is not None:
+                md = _parse_page_via_vllm(
+                    page.image_path,
+                    base_url=base_url,
+                    model_id=model_id,
+                    api_key=api_key,
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                )
+            else:
+                md = clean_ocr_markdown(page.native_text)
             if md:
                 parsed.append(PageMarkdown(page_number=page.page_number, markdown=md))
 

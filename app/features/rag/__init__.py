@@ -19,6 +19,7 @@ from app.features.rag.context import (
     SHORT_QUESTION_WORDS,
     build_context,
     filter_relevant_history,
+    is_document_reference_query,
     is_follow_up_question,
     resolve_query_topic,
     retrieval_query,
@@ -31,7 +32,13 @@ from app.features.rag.ingestor import (
     delete_user_rag_documents,
     ingest_chunks,
 )
-from app.features.rag.retriever import build_scope_filter, get_astra_collection, retrieve
+from app.features.rag.retriever import (
+    build_scope_filter,
+    fetch_user_document_chunks,
+    get_astra_collection,
+    retrieve,
+    retrieve_for_chat,
+)
 
 __all__ = [
     'AUTO_LEARN_SOURCE_TITLE',
@@ -48,10 +55,12 @@ __all__ = [
     'delete_document_chunks',
     'delete_user_rag_documents',
     'evaluate_kka_gate',
+    'fetch_user_document_chunks',
     'filter_relevant_history',
     'get_astra_collection',
     'ingest_chunks',
     'is_auto_learn_enabled',
+    'is_document_reference_query',
     'is_follow_up_question',
     'match_kka_domain_terms',
     'maybe_auto_learn_from_exchange',
@@ -59,5 +68,6 @@ __all__ = [
     'resolve_query_topic',
     'retrieval_query',
     'retrieve',
+    'retrieve_for_chat',
     'verify_and_distill_kka_note',
 ]

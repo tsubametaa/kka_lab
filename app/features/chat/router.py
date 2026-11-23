@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import nullcontext
+from datetime import datetime, timezone
 import json
 import logging
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
@@ -20,9 +21,10 @@ from app.features.rag.auto_learner import (
 from app.features.rag.context import (
     build_context,
     filter_relevant_history,
+    is_document_reference_query,
     retrieval_query,
 )
-from app.features.rag.retriever import retrieve
+from app.features.rag.retriever import retrieve, retrieve_for_chat
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=['chat'])
@@ -49,7 +51,11 @@ def _prepare_session_and_memory(store, payload: ChatRequest, question: str):
     elif not store.session_belongs_to(session_id, payload.user_id):
         raise HTTPException(status_code=404, detail='Sesi tidak ditemukan.')
 
-    repeated = store.find_repeated_question(payload.user_id, question, mode=payload.mode)
+    repeated = (
+        None
+        if is_document_reference_query(question)
+        else store.find_repeated_question(payload.user_id, question, mode=payload.mode)
+    )
     history = store.history(session_id)
     active_history = [] if payload.reset_context else filter_relevant_history(question, history)
     lang = detect_language(question, active_history)
@@ -65,6 +71,47 @@ def _prepare_session_and_memory(store, payload: ChatRequest, question: str):
     return session_id, active_history, lang, memory, repeated is not None
 
 
+def _is_recent_job(job, max_age_seconds=180):
+    raw_ts = job.get('updated_at') or job.get('created_at') or ''
+    if not raw_ts:
+        return False
+    try:
+        dt = datetime.fromisoformat(str(raw_ts).replace('Z', '+00:00'))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt).total_seconds() <= max_age_seconds
+    except Exception:
+        return False
+
+
+def _pick_target_user_doc_id(question, completed_docs):
+    if not completed_docs:
+        return None
+    lower = (question or '').lower()
+    for doc in completed_docs:
+        for field in ('source_title', 'filename'):
+            val = str(doc.get(field) or '').strip().lower()
+            stem = val.rsplit('.', 1)[0] if '.' in val else val
+            if len(stem) >= 4 and stem in lower:
+                return doc.get('doc_id')
+    return completed_docs[0].get('doc_id')
+
+
+async def _wait_for_active_user_jobs(store, active_jobs, max_wait_seconds=12.0):
+    if not active_jobs or not hasattr(store, 'get_ingestion_job'):
+        return
+    recent_active = [j for j in active_jobs if j.get('job_id') and _is_recent_job(j)]
+    if not recent_active:
+        return
+    deadline = asyncio.get_running_loop().time() + max_wait_seconds
+    target_id = recent_active[0]['job_id']
+    while asyncio.get_running_loop().time() < deadline:
+        job = await run_in_threadpool(store.get_ingestion_job, target_id)
+        if not job or job.get('status') not in ('queued', 'processing'):
+            return
+        await asyncio.sleep(1.5)
+
+
 async def _prepare_rag_and_persona(assistant, store, payload: ChatRequest, question: str, active_history):
     previous_user = ''
     previous_assistant = ''
@@ -76,6 +123,26 @@ async def _prepare_rag_and_persona(assistant, store, payload: ChatRequest, quest
             previous_user = msg.get('content', '')
         if previous_user and previous_assistant:
             break
+
+    user_docs = []
+    if hasattr(store, 'list_user_documents'):
+        user_docs = await run_in_threadpool(store.list_user_documents, payload.user_id)
+
+    explicit_doc_ref = is_document_reference_query(question, user_docs)
+    completed_docs = [
+        d for d in user_docs
+        if d.get('status') == 'completed' and (d.get('chunks_inserted') or 0) > 0
+    ]
+    active_jobs = [d for d in user_docs if d.get('status') in ('queued', 'processing')]
+    if active_jobs and (explicit_doc_ref or not completed_docs):
+        await _wait_for_active_user_jobs(store, active_jobs)
+        user_docs = await run_in_threadpool(store.list_user_documents, payload.user_id)
+        completed_docs = [
+            d for d in user_docs
+            if d.get('status') == 'completed' and (d.get('chunks_inserted') or 0) > 0
+        ]
+        active_jobs = [d for d in user_docs if d.get('status') in ('queued', 'processing')]
+        explicit_doc_ref = is_document_reference_query(question, user_docs)
 
     query = retrieval_query(question, previous_user, previous_assistant)
     recent_turn = active_history[-2:] if active_history else None
@@ -90,8 +157,46 @@ async def _prepare_rag_and_persona(assistant, store, payload: ChatRequest, quest
                 return bilingual_queries(query, assistant.model, assistant.tokenizer, history=recent_turn)
         search_queries = await run_in_threadpool(_sync_translate)
 
-    docs = await run_in_threadpool(retrieve, search_queries, user_id=payload.user_id)
-    context, sources = await run_in_threadpool(build_context, docs, assistant.tokenizer)
+    target_doc_id = _pick_target_user_doc_id(question, completed_docs)
+    if completed_docs:
+        docs = await run_in_threadpool(
+            retrieve_for_chat,
+            search_queries,
+            user_id=payload.user_id,
+            latest_doc_id=target_doc_id,
+            explicit_doc_ref=explicit_doc_ref,
+            top_k=5,
+            user_top_k=5,
+        )
+        context_budget = 2200
+    else:
+        docs = await run_in_threadpool(retrieve, search_queries, user_id=payload.user_id)
+        context_budget = 1200
+
+    context, sources = await run_in_threadpool(
+        build_context, docs, assistant.tokenizer, context_budget
+    )
+
+    if explicit_doc_ref and not any(
+        s.get('scope') == 'user' for s in sources
+    ):
+        recent_active = [j for j in active_jobs if _is_recent_job(j)]
+        if recent_active:
+            fname = recent_active[0].get('filename') or 'dokumen'
+            note = (
+                f'Catatan Status Unggahan: Dokumen "{fname}" masih sedang diproses OCR. '
+                'Beri tahu siswa untuk menunggu beberapa detik lalu tanyakan kembali.'
+            )
+            context = f'{note}\n\n{context}'.strip() if context else note
+        elif user_docs and user_docs[0].get('status') == 'failed' and _is_recent_job(user_docs[0], max_age_seconds=900):
+            fname = user_docs[0].get('filename') or 'dokumen'
+            err = user_docs[0].get('error_message') or 'gagal diproses'
+            note = (
+                f'Catatan Status Unggahan: Dokumen "{fname}" gagal diproses ({err}). '
+                'Sampaikan jujur bahwa dokumen belum terbaca dan sarankan unggah ulang.'
+            )
+            context = f'{note}\n\n{context}'.strip() if context else note
+
     persona = await run_in_threadpool(store.get_persona, payload.user_id)
     return context, sources, persona
 
@@ -165,7 +270,6 @@ async def chat(payload: ChatRequest, request: Request, background_tasks: Backgro
         'training': training,
     }
 
-
 @router.post('/api/chat/stream')
 async def chat_stream(payload: ChatRequest, request: Request, background_tasks: BackgroundTasks):
     if payload.mode not in ('umum', 'terstruktur'):
@@ -182,8 +286,6 @@ async def chat_stream(payload: ChatRequest, request: Request, background_tasks: 
     student_name = payload.student_name or ''
 
     async def _event_generator():
-        # Emit keepalive immediately so upstream HTTP proxies never hit ResponseHeaderTimeout
-        # while bilingual query translation and Astra DB retrieval run.
         yield ': retrieving\n\n'
         chunks = []
         stream_sanitizer = StreamingSanitizer()

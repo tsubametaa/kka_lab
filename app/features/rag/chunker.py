@@ -3,12 +3,15 @@
 import re
 from dataclasses import dataclass
 
-DEFAULT_CHUNK_TOKENS = 300
-DEFAULT_OVERLAP_TOKENS = 40
+DEFAULT_CHUNK_TOKENS = 220
+DEFAULT_OVERLAP_TOKENS = 35
+MAX_EMBED_TOKENS = 320
+MAX_CHUNK_CHARS = 1100
 
 _HEADING_RE = re.compile(r'^(#{1,4})\s+(.+?)\s*$')
 _FENCE_RE = re.compile(r'^(\s*(?:```|~~~|\$\$))')
 _TABLE_LINE_RE = re.compile(r'^\s*\|.*\|\s*$')
+_EMBED_PART_RE = re.compile(r'[A-Za-zÀ-ÿ]+|\d|[^\w\s]')
 
 
 @dataclass(frozen=True)
@@ -19,13 +22,26 @@ class DocumentChunk:
     pages_pdf: int | list[int]
 
 
+def _estimate_embed_tokens(text):
+    """Conservative upper-bound token estimate for WordPiece/E5 512-token embedding APIs."""
+    if not text:
+        return 0
+    total = 0
+    for part in _EMBED_PART_RE.findall(text):
+        if len(part) <= 4:
+            total += 1
+        else:
+            total += (len(part) + 3) // 4
+    return max(1, total)
+
+
 def _count_tokens(text, tokenizer=None):
     if not text:
         return 0
+    est = _estimate_embed_tokens(text)
     if tokenizer is not None:
-        return len(tokenizer.encode(text, add_special_tokens=False))
-    # Estimasi konservatif ~3.5 karakter per token untuk teks Indonesia/Inggris + LaTeX.
-    return max(1, (len(text) + 2) // 3)
+        return max(len(tokenizer.encode(text, add_special_tokens=False)), est)
+    return est
 
 
 def _parse_markdown_blocks(pages):
@@ -108,9 +124,34 @@ def _parse_markdown_blocks(pages):
     return blocks
 
 
-def _split_oversized_block(text, max_tokens, tokenizer):
-    """Pecah satu blok yang terlalu panjang berdasarkan baris/kalimat."""
-    if _count_tokens(text, tokenizer) <= max_tokens:
+def _split_long_unit(unit, max_tokens, tokenizer, max_chars=MAX_CHUNK_CHARS):
+    """Split a single long line/sentence by words, then hard slice unbroken tokens."""
+    if _count_tokens(unit, tokenizer) <= max_tokens and len(unit) <= max_chars:
+        return [unit]
+    pieces, cur = [], []
+    for word in unit.split():
+        if _count_tokens(word, tokenizer) > max_tokens or len(word) > max_chars:
+            if cur:
+                pieces.append(' '.join(cur))
+                cur = []
+            step = max(80, min(max_chars // 2, max_tokens * 2))
+            for i in range(0, len(word), step):
+                pieces.append(word[i:i + step])
+            continue
+        candidate = ' '.join([*cur, word]) if cur else word
+        if cur and (_count_tokens(candidate, tokenizer) > max_tokens or len(candidate) > max_chars):
+            pieces.append(' '.join(cur))
+            cur = [word]
+        else:
+            cur.append(word)
+    if cur:
+        pieces.append(' '.join(cur))
+    return pieces or [unit[:max_chars]]
+
+
+def _split_oversized_block(text, max_tokens, tokenizer, max_chars=MAX_CHUNK_CHARS):
+    """Pecah satu blok yang terlalu panjang berdasarkan baris/kalimat/kata."""
+    if _count_tokens(text, tokenizer) <= max_tokens and len(text) <= max_chars:
         return [text]
 
     lines = text.split('\n')
@@ -118,35 +159,49 @@ def _split_oversized_block(text, max_tokens, tokenizer):
     if len(lines) >= 3 and all(_TABLE_LINE_RE.match(ln) for ln in lines[:2]):
         table_header = '\n'.join(lines[:2])
         header_tokens = _count_tokens(table_header, tokenizer) + 2
-        pieces, current, cur_tokens = [], [table_header], header_tokens
-        for row in lines[2:]:
-            row_tokens = _count_tokens(row, tokenizer) + 1
-            if len(current) > 1 and cur_tokens + row_tokens > max_tokens:
+        if header_tokens < max_tokens and len(table_header) < max_chars:
+            pieces, current, cur_tokens = [], [table_header], header_tokens
+            cur_chars = len(table_header)
+            for row in lines[2:]:
+                row_tokens = _count_tokens(row, tokenizer) + 1
+                if _count_tokens(row, tokenizer) + header_tokens > max_tokens or len(row) + len(table_header) > max_chars:
+                    if len(current) > 1:
+                        pieces.append('\n'.join(current))
+                        current, cur_tokens, cur_chars = [table_header], header_tokens, len(table_header)
+                    pieces.extend(_split_long_unit(row, max_tokens, tokenizer, max_chars=max_chars))
+                    continue
+                if len(current) > 1 and (cur_tokens + row_tokens > max_tokens or cur_chars + len(row) + 1 > max_chars):
+                    pieces.append('\n'.join(current))
+                    current = [table_header, row]
+                    cur_tokens = header_tokens + row_tokens
+                    cur_chars = len(table_header) + len(row) + 1
+                else:
+                    current.append(row)
+                    cur_tokens += row_tokens
+                    cur_chars += len(row) + 1
+            if len(current) > 1:
                 pieces.append('\n'.join(current))
-                current, cur_tokens = [table_header, row], header_tokens + row_tokens
-            else:
-                current.append(row)
-                cur_tokens += row_tokens
-        if len(current) > 1:
-            pieces.append('\n'.join(current))
-        return pieces or [text]
+            if pieces:
+                return pieces
 
     units = re.split(r'(?<=[.!?])\s+|\n+', text)
-    pieces, current, cur_tokens = [], [], 0
-    for unit in units:
-        unit = unit.strip()
-        if not unit:
+    pieces, current, cur_tokens, cur_chars = [], [], 0, 0
+    for raw_unit in units:
+        raw_unit = raw_unit.strip()
+        if not raw_unit:
             continue
-        u_tokens = _count_tokens(unit, tokenizer) + 1
-        if current and cur_tokens + u_tokens > max_tokens:
-            pieces.append(' '.join(current))
-            current, cur_tokens = [unit], u_tokens
-        else:
-            current.append(unit)
-            cur_tokens += u_tokens
+        for unit in _split_long_unit(raw_unit, max_tokens, tokenizer, max_chars=max_chars):
+            u_tokens = _count_tokens(unit, tokenizer) + 1
+            if current and (cur_tokens + u_tokens > max_tokens or cur_chars + len(unit) + 1 > max_chars):
+                pieces.append(' '.join(current))
+                current, cur_tokens, cur_chars = [unit], u_tokens, len(unit)
+            else:
+                current.append(unit)
+                cur_tokens += u_tokens
+                cur_chars += len(unit) + 1
     if current:
         pieces.append(' '.join(current))
-    return pieces or [text]
+    return pieces or _split_long_unit(text, max_tokens, tokenizer, max_chars=max_chars)
 
 def _format_pages(page_numbers):
     unique = sorted(set(page_numbers))
