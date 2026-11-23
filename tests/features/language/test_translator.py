@@ -65,6 +65,22 @@ class LanguageTranslatorTests(unittest.TestCase):
         self.assertIn('PEMBUKA_TUGAS', sent_user_query)
         self.assertIn('PERTANYAAN_INTI_SISWA?', sent_user_query)
 
+    def test_bilingual_queries_rewrites_with_chat_history_when_provided(self):
+        history = [
+            {'role': 'user', 'content': 'apa itu labeling data?'},
+            {'role': 'assistant', 'content': 'Menurutmu, apa risiko jika data diberi label Salah?'},
+        ]
+        with patch(
+            'app.features.language.translator._generate_local_text',
+            return_value='{"id":"risiko kesalahan labeling data","en":"risks of mislabeling data"}',
+        ) as mock_gen:
+            queries = bilingual_queries('saya tidak tahu, memangnya risikonya apa?', object(), object(), history=history)
+        self.assertEqual(queries, ['risiko kesalahan labeling data', 'risks of mislabeling data'])
+        sent_messages = mock_gen.call_args[0][0]
+        self.assertIn('<Chat History>', sent_messages[-1]['content'])
+        self.assertIn('labeling data', sent_messages[-1]['content'])
+        self.assertIn('<Follow Up Message>', sent_messages[-1]['content'])
+
 
 if __name__ == '__main__':
     unittest.main()

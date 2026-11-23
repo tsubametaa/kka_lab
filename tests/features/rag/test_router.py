@@ -54,6 +54,7 @@ class RagRouterTests(unittest.TestCase):
             'ASTRA_DB_API_ENDPOINT': 'https://example-astra.apps.astra.datastax.com',
             'ASTRA_DB_APPLICATION_TOKEN': 'AstraCS:test_token',
             'OCR_UPLOAD_DIR': str(Path(self.temp_dir.name) / 'uploads'),
+            'AI_INTERNAL_SECRET': '',
         }, clear=False)
         self.env_patch.start()
 

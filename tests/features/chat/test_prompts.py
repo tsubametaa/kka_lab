@@ -6,10 +6,12 @@ from app.features.chat import (
     DEFAULT_MAX_NEW_TOKENS,
     DEFAULT_SAMPLING_CONFIG,
     MODEL_MAX_CONTEXT_TOKENS,
+    SentenceBoundaryStoppingCriteria,
     build_generation_kwargs,
     count_prompt_tokens,
     fit_messages_to_budget,
     make_system,
+    resolve_max_new_tokens,
     resolve_max_prompt_tokens,
 )
 from tests.fakes import ChatTemplateTokenizer
@@ -173,6 +175,42 @@ class ChatPromptsTests(unittest.TestCase):
             )
         self.assertIn('Pertanyaan terlalu panjang', str(ctx.exception))
         self.assertIn('batas: 50', str(ctx.exception))
+
+    def test_resolve_max_new_tokens_caps_by_mode(self):
+        self.assertEqual(resolve_max_new_tokens('terstruktur', 768), 280)
+        self.assertEqual(resolve_max_new_tokens('umum', 768), 448)
+        self.assertEqual(resolve_max_new_tokens('terstruktur', 200), 200)
+
+    def test_sentence_boundary_stopping_criteria_stops_cleanly_after_soft_limit(self):
+        class DecodeTok:
+            def __init__(self, decoded_text):
+                self.decoded_text = decoded_text
+
+            def decode(self, _ids, skip_special_tokens=True):
+                return self.decoded_text
+
+        class FakeIds:
+            def __init__(self, total_len):
+                self.shape = (1, total_len)
+
+            def __getitem__(self, _item):
+                return [1, 2, 3]
+
+        # Below soft limit (0.78 * 100 = 78): never stop early
+        crit = SentenceBoundaryStoppingCriteria(DecodeTok('Kalimat selesai.'), prompt_len=10, max_new_tokens=100)
+        self.assertFalse(crit(FakeIds(10 + 50), None))
+
+        # Past soft limit, mid-sentence: keep generating
+        crit_mid = SentenceBoundaryStoppingCriteria(DecodeTok('Langkah berikutnya adalah mengevalu'), prompt_len=10, max_new_tokens=100)
+        self.assertFalse(crit_mid(FakeIds(10 + 82), None))
+
+        # Past soft limit, inside unclosed code block: keep generating
+        crit_code = SentenceBoundaryStoppingCriteria(DecodeTok('```python\nprint("hi.")'), prompt_len=10, max_new_tokens=100)
+        self.assertFalse(crit_code(FakeIds(10 + 82), None))
+
+        # Past soft limit, complete sentence: stop cleanly
+        crit_done = SentenceBoundaryStoppingCriteria(DecodeTok('Penjelasannya cukup jelas. Bagaimana menurutmu?'), prompt_len=10, max_new_tokens=100)
+        self.assertTrue(crit_done(FakeIds(10 + 82), None))
 
 
 if __name__ == '__main__':

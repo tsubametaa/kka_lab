@@ -37,6 +37,7 @@ class AutoLearnKkaTests(unittest.TestCase):
             'ASTRA_DB_APPLICATION_TOKEN': 'AstraCS:test_token',
             'RAG_AUTO_LEARN_ENABLED': 'true',
             'RAG_AUTO_LEARN_MAX_SIMILARITY': '0.82',
+            'AI_INTERNAL_SECRET': '',
         }, clear=False)
         self.env_patch.start()
 

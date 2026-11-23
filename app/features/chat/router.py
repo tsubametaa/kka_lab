@@ -66,17 +66,28 @@ def _prepare_session_and_memory(store, payload: ChatRequest, question: str):
 
 
 async def _prepare_rag_and_persona(assistant, store, payload: ChatRequest, question: str, active_history):
-    previous_topic = active_history[-2]['content'] if len(active_history) >= 2 else ''
-    query = retrieval_query(question, previous_topic)
+    previous_user = ''
+    previous_assistant = ''
+    for msg in reversed(active_history or []):
+        role = msg.get('role')
+        if role == 'assistant' and not previous_assistant:
+            previous_assistant = msg.get('content', '')
+        elif role == 'user' and not previous_user:
+            previous_user = msg.get('content', '')
+        if previous_user and previous_assistant:
+            break
+
+    query = retrieval_query(question, previous_user, previous_assistant)
+    recent_turn = active_history[-2:] if active_history else None
     if hasattr(assistant, 'atranslate_queries'):
-        search_queries = await assistant.atranslate_queries(query)
+        search_queries = await assistant.atranslate_queries(query, history=recent_turn)
     elif hasattr(assistant, 'translate_queries'):
-        search_queries = await run_in_threadpool(assistant.translate_queries, query)
+        search_queries = await run_in_threadpool(assistant.translate_queries, query, recent_turn)
     else:
         def _sync_translate():
             lock = getattr(assistant, 'gpu_lock', None) or nullcontext()
             with lock:
-                return bilingual_queries(query, assistant.model, assistant.tokenizer)
+                return bilingual_queries(query, assistant.model, assistant.tokenizer, history=recent_turn)
         search_queries = await run_in_threadpool(_sync_translate)
 
     docs = await run_in_threadpool(retrieve, search_queries, user_id=payload.user_id)
@@ -168,23 +179,20 @@ async def chat_stream(payload: ChatRequest, request: Request, background_tasks: 
     session_id, active_history, lang, memory, memory_hit = await run_in_threadpool(
         _prepare_session_and_memory, store, payload, question
     )
-    try:
-        context, sources, persona = await _prepare_rag_and_persona(
-            assistant, store, payload, question, active_history
-        )
-    except ValueError as error:
-        raise HTTPException(status_code=400, detail=str(error)) from error
-    except Exception as error:
-        logger.exception('Gagal menyiapkan konteks stream chat')
-        raise HTTPException(status_code=503, detail='Layanan AI tidak tersedia.') from error
-
     student_name = payload.student_name or ''
 
     async def _event_generator():
-        yield _sse_event('sources', {'session_id': session_id, 'sources': sources})
+        # Emit keepalive immediately so upstream HTTP proxies never hit ResponseHeaderTimeout
+        # while bilingual query translation and Astra DB retrieval run.
+        yield ': retrieving\n\n'
         chunks = []
         stream_sanitizer = StreamingSanitizer()
         try:
+            context, sources, persona = await _prepare_rag_and_persona(
+                assistant, store, payload, question, active_history
+            )
+            yield _sse_event('sources', {'session_id': session_id, 'sources': sources})
+
             if hasattr(assistant, 'astream'):
                 async for delta in assistant.astream(
                     question, payload.mode, active_history, context, memory,
@@ -224,6 +232,8 @@ async def chat_stream(payload: ChatRequest, request: Request, background_tasks: 
             })
         except asyncio.CancelledError:
             return
+        except ValueError as error:
+            yield _sse_event('error', {'detail': str(error)})
         except Exception:
             logger.exception('Gagal memproses stream chat')
             yield _sse_event('error', {'detail': 'Layanan AI tidak tersedia.'})

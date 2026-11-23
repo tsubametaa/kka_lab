@@ -36,16 +36,83 @@ _ANAPHORIC_CUES = {
     'contohnya', 'maksudnya', 'bedanya', 'perbedaannya', 'langkahnya',
     'caranya', 'fungsinya', 'tujuannya', 'kelebihannya', 'kekurangannya',
     'dampaknya', 'solusinya', 'kodenya', 'rumusnya', 'artinya', 'kerjanya',
+    'risikonya', 'alasannya', 'jawabannya', 'hasilnya', 'efeknya', 'akibatnya',
     'keduanya', 'tersebut', 'tadi', 'gitu', 'begitu', 'lanjut', 'lanjutan',
     'lanjutkan', 'teruskan', 'ulangi', 'sebelumnya', 'berikutnya',
-    'selanjutnya', 'it', 'this', 'that', 'those', 'these', 'them', 'same',
-    'previous', 'elaborate', 'continue',
+    'selanjutnya', 'memangnya', 'emangnya', 'emang', 'it', 'this', 'that',
+    'those', 'these', 'them', 'same', 'previous', 'elaborate', 'continue',
 }
+
+_ASSISTANT_REPLY_PHRASES = (
+    'tidak tahu', 'nggak tahu', 'gak tau', 'ga tau', 'ndak tahu',
+    'belum tahu', 'kurang tahu', 'kurang paham', 'belum paham',
+    'tidak paham', 'nggak paham', 'gak paham', 'bingung',
+    'memangnya', 'emangnya', 'jawabannya apa', 'apa jawabannya',
+    'maksudnya apa', 'maksudnya gimana', 'maksudnya bagaimana',
+    'kenapa begitu', 'kenapa gitu', 'mengapa begitu',
+    'langsung jelaskan', 'tolong jelaskan saja', 'kasih tahu saja',
+    'benar ga', 'benar gak', 'benar nggak', 'betulkah', 'sudah benar',
+    'don t know', 'do not know', 'not sure', 'no idea',
+    'what is the answer', 'what are the risks', 'what do you mean', 'why is that',
+)
+
+
+def _stem_term(word):
+    for suffix in ('nya', 'kah', 'lah', 'pun', 'ku', 'mu'):
+        if len(word) > len(suffix) + 3 and word.endswith(suffix):
+            return word[:-len(suffix)]
+    return word
+
+
+def _stemmed_terms(text):
+    return {_stem_term(w) for w in _knowledge_terms(text)}
 
 
 def _has_anaphoric_cue(question):
     words = normalize_question(question).split()
     return any(w in _ANAPHORIC_CUES for w in words)
+
+
+def _is_assistant_reply(question, prev_assistant=''):
+    """Deteksi apakah siswa menjawab atau bertanya balik terhadap pertanyaan asisten sebelumnya."""
+    if not question or not question.strip():
+        return False
+    normalized = normalize_question(question)
+    if not normalized:
+        return False
+    if _STANDALONE_OPENER_RE.search(question):
+        return False
+    if any(phrase in normalized for phrase in _ASSISTANT_REPLY_PHRASES):
+        return True
+    if prev_assistant and '?' in prev_assistant:
+        q_stems = _stemmed_terms(question)
+        a_stems = _stemmed_terms(prev_assistant)
+        if q_stems & a_stems:
+            return True
+    return False
+
+
+def _extract_assistant_focus(assistant_message, max_chars=260):
+    """Ambil kalimat penutup/pertanyaan utama dari respons asisten sebelumnya."""
+    cleaned = ' '.join((assistant_message or '').split())
+    if not cleaned:
+        return ''
+    if len(cleaned) <= max_chars:
+        return cleaned
+    sentences = re.split(r'(?<=[.!?])\s+', cleaned)
+    tail_parts = []
+    total = 0
+    for sent in reversed(sentences):
+        if not sent:
+            continue
+        if tail_parts and total + len(sent) + 1 > max_chars:
+            break
+        tail_parts.insert(0, sent)
+        total += len(sent) + 1
+    result = ' '.join(tail_parts).strip()
+    if len(result) > max_chars:
+        result = result[-max_chars:].lstrip()
+    return result
 
 
 def is_follow_up_question(question, topic=''):
@@ -57,8 +124,8 @@ def is_follow_up_question(question, topic=''):
     if not q_words:
         return False
 
-    q_terms = _knowledge_terms(question)
-    t_terms = _knowledge_terms(topic)
+    q_terms = _stemmed_terms(question)
+    t_terms = _stemmed_terms(topic)
 
     # 1. Ada irisan istilah kunci dengan pertanyaan sebelumnya -> masih satu topik
     if q_terms & t_terms:
@@ -88,11 +155,25 @@ def is_follow_up_question(question, topic=''):
     )
 
 
-def retrieval_query(question, topic=''):
-    """Gabungkan pertanyaan follow-up pendek (<6 kata) dengan topik aktifnya; topik baru dibiarkan bersih."""
-    if topic and len(question.split()) < SHORT_QUESTION_WORDS and is_follow_up_question(question, topic):
-        return f'{topic} {question}'
-    return question
+def retrieval_query(question, topic='', assistant_message=''):
+    """Gabungkan pertanyaan follow-up atau balasan terhadap pertanyaan asisten dengan topik aktif."""
+    clean_q = (question or '').strip()
+    clean_topic = (topic or '').strip()
+    clean_asst = (assistant_message or '').strip()
+
+    if clean_asst and (_is_assistant_reply(clean_q, clean_asst) or (clean_topic and is_follow_up_question(clean_q, clean_topic))):
+        asst_focus = _extract_assistant_focus(clean_asst)
+        parts = []
+        if clean_topic:
+            parts.append(clean_topic[:140].strip())
+        if asst_focus:
+            parts.append(asst_focus)
+        parts.append(clean_q)
+        return ' '.join(parts)
+
+    if clean_topic and len(clean_q.split()) < SHORT_QUESTION_WORDS and is_follow_up_question(clean_q, clean_topic):
+        return f'{clean_topic} {clean_q}'
+    return clean_q
 
 
 def resolve_query_topic(question, topic=''):
@@ -105,10 +186,13 @@ def resolve_query_topic(question, topic=''):
 def _turns_related(current_question, prev_user, prev_assistant):
     if is_follow_up_question(current_question, prev_user):
         return True
+    if _is_assistant_reply(current_question, prev_assistant):
+        return True
     if _STANDALONE_OPENER_RE.search(current_question):
         return False
-    q_terms = _knowledge_terms(current_question)
-    if len(q_terms) >= 1 and len(q_terms & _knowledge_terms(prev_assistant)) >= 2:
+    q_terms = _stemmed_terms(current_question)
+    a_terms = _stemmed_terms(prev_assistant)
+    if len(q_terms) >= 1 and len(q_terms & a_terms) >= 1:
         return True
     return False
 

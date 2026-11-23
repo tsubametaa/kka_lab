@@ -112,10 +112,14 @@ def detect_language(text, history=None, default='id'):
     return default if default in LOCALES else 'id'
 
 
-def format_user_message(question, lang):
-    """Attach a transient language reminder for model generation without altering stored history."""
+def format_user_message(question, lang, persona=''):
+    """Attach a transient language (+ optional persona) reminder without altering stored history."""
     locale = LOCALES.get(lang, id)
-    reminder = locale.USER_LANGUAGE_REMINDER
+    clean_persona = re.sub(r'\s+', ' ', (persona or '')).strip()
+    if clean_persona and hasattr(locale, 'USER_PERSONA_REMINDER_TEMPLATE'):
+        reminder = locale.USER_PERSONA_REMINDER_TEMPLATE.format(persona=clean_persona)
+    else:
+        reminder = locale.USER_LANGUAGE_REMINDER
     stripped = question.strip()
     if stripped.endswith(reminder):
         return stripped

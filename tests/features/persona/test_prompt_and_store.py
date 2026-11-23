@@ -1,9 +1,12 @@
 """Tests for persona/student_name prompt wrapping and ChatStore persistence."""
 
 import unittest
+from contextlib import contextmanager
 
+from app.features.chat.assistant import LocalAssistant
 from app.features.chat.prompts import fit_messages_to_budget, make_system
 from app.features.chat.router import ChatRequest
+from app.features.language.detector import format_user_message
 from app.features.memory.store import ChatStore
 from tests.fakes import InMemoryAstraCollection
 
@@ -27,8 +30,12 @@ class PersonaPromptTests(unittest.TestCase):
             self.assertIn(header, system)
             self.assertIn(f'<persona_siswa>\n{TSUNDERE}\n</persona_siswa>', system)
             self.assertIn(rule, system)
-            # Persona sebelum konteks sumber; aturan bahasa tetap paling akhir.
+            # Persona sebelum konteks sumber; pengingat persona setelah konteks; aturan bahasa paling akhir.
             self.assertLess(system.index('<persona_siswa>'), system.index('[S1] materi'))
+            self.assertGreater(
+                system.index('PENGINGAT PERSONA WAJIB' if lang == 'id' else 'MANDATORY PERSONA REMINDER'),
+                system.index('[S1] materi'),
+            )
             self.assertTrue(system.rstrip().endswith(
                 ('Never answer in Indonesian.', 'menggunakan bahasa Inggris.')
             ))
@@ -50,6 +57,47 @@ class PersonaPromptTests(unittest.TestCase):
 
         req = ChatRequest(user_id='uuid-1', student_name='Siti', question='Halo')
         self.assertEqual(req.student_name, 'Siti')
+
+    def test_transient_user_persona_reminder_and_lora_bypass(self):
+        msg_id = format_user_message('Apakah AI lebih pintar?', 'id', persona=TSUNDERE)
+        self.assertIn(TSUNDERE, msg_id)
+        self.assertEqual(format_user_message(msg_id, 'id', persona=TSUNDERE), msg_id)
+
+        msg_plain = format_user_message('Apakah AI lebih pintar?', 'id')
+        self.assertNotIn('persona', msg_plain.lower())
+
+        toggled = []
+
+        class _FakePeftModel:
+            @contextmanager
+            def disable_adapter(self):
+                toggled.append('enter')
+                try:
+                    yield
+                finally:
+                    toggled.append('exit')
+
+        inst = object.__new__(LocalAssistant)
+        inst.model = _FakePeftModel()
+        inst.do_sample = True
+        inst.temperature = 0.45
+        inst.top_p = 0.9
+        inst.min_p = 0.05
+
+        with inst._adapter_context(TSUNDERE):
+            pass
+        self.assertEqual(toggled, ['enter', 'exit'])
+
+        toggled.clear()
+        with inst._adapter_context(''):
+            pass
+        self.assertEqual(toggled, [])
+
+        sampling = inst._sampling_for_request(TSUNDERE)
+        self.assertEqual(sampling['temperature'], 0.7)
+        self.assertEqual(sampling['top_p'], 0.8)
+        self.assertEqual(sampling['top_k'], 20)
+        self.assertEqual(sampling['min_p'], 0.0)
 
 
 class PersonaStoreTests(unittest.TestCase):

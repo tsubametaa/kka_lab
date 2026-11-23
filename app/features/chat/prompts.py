@@ -1,7 +1,14 @@
 """System prompts and pedagogical scaffolding definitions."""
 
+import os
 import re
 import unicodedata
+
+try:
+    from transformers import StoppingCriteria
+except ImportError:
+    class StoppingCriteria:  # type: ignore[no-redef]
+        pass
 
 from app.features.language.locales import LOCALES, id as id_locale
 
@@ -12,7 +19,11 @@ POLICIES = id_locale.POLICIES
 
 MODEL_MAX_CONTEXT_TOKENS = 32768
 DEFAULT_MAX_PROMPT_TOKENS = MODEL_MAX_CONTEXT_TOKENS - 512 - 32  # 32224
-DEFAULT_MAX_NEW_TOKENS = 768
+DEFAULT_MAX_NEW_TOKENS = 448
+MODE_MAX_NEW_TOKENS = {
+    'umum': 448,
+    'terstruktur': 280,
+}
 DEFAULT_SAMPLING_CONFIG = {
     'do_sample': True,
     'temperature': 0.45,
@@ -21,6 +32,76 @@ DEFAULT_SAMPLING_CONFIG = {
     'repetition_penalty': 1.08,
 }
 
+_LIST_NUMBER_END_RE = re.compile(r'(?:^|\n)\s*\d{1,2}\.\s*$')
+
+
+def resolve_max_new_tokens(mode, configured=None):
+    """Return concise per-mode token ceiling so responses stay focused without rambling."""
+    env_key = 'MAX_NEW_TOKENS_TERSTRUKTUR' if mode == 'terstruktur' else 'MAX_NEW_TOKENS_UMUM'
+    env_val = os.getenv(env_key, '').strip()
+    if env_val:
+        try:
+            parsed = int(env_val)
+            if parsed > 0:
+                return parsed
+        except ValueError:
+            pass
+    mode_cap = MODE_MAX_NEW_TOKENS.get(mode, DEFAULT_MAX_NEW_TOKENS)
+    if configured is not None and int(configured) > 0:
+        return min(int(configured), mode_cap)
+    return mode_cap
+
+
+def resolve_eos_token_ids(tokenizer, model=None):
+    """Collect unique EOS token IDs from both model generation_config and tokenizer."""
+    ids = []
+    gen_cfg = getattr(model, 'generation_config', None) if model is not None else None
+    raw_eos = getattr(gen_cfg, 'eos_token_id', None)
+    if isinstance(raw_eos, (list, tuple)):
+        ids.extend(int(x) for x in raw_eos if x is not None)
+    elif isinstance(raw_eos, int):
+        ids.append(raw_eos)
+    tok_eos = getattr(tokenizer, 'eos_token_id', None)
+    if isinstance(tok_eos, (list, tuple)):
+        ids.extend(int(x) for x in tok_eos if x is not None)
+    elif isinstance(tok_eos, int):
+        ids.append(tok_eos)
+    unique = list(dict.fromkeys(ids))
+    if not unique:
+        return None
+    return unique[0] if len(unique) == 1 else unique
+
+
+class SentenceBoundaryStoppingCriteria(StoppingCriteria):
+    """Stop cleanly at a complete sentence boundary once generation enters the soft token budget."""
+
+    def __init__(self, tokenizer, prompt_len, max_new_tokens, soft_ratio=0.78):
+        self.tokenizer = tokenizer
+        self.prompt_len = int(prompt_len)
+        self.max_new_tokens = max(32, int(max_new_tokens))
+        self.soft_limit = max(64, int(self.max_new_tokens * soft_ratio))
+
+    def __call__(self, input_ids, scores, **kwargs):
+        if input_ids is None or input_ids.shape[1] - self.prompt_len < self.soft_limit:
+            return False
+        generated_ids = input_ids[0, self.prompt_len:]
+        if hasattr(generated_ids, 'tolist'):
+            generated_ids = generated_ids.tolist()
+        text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
+        stripped = text.rstrip()
+        if not stripped:
+            return False
+        # Do not stop inside an unclosed fenced code block.
+        if stripped.count('```') % 2 == 1:
+            return False
+        if stripped.endswith('```'):
+            return True
+        if stripped.endswith('...') or _LIST_NUMBER_END_RE.search(stripped):
+            return False
+        tail = stripped.rstrip('"\')]*_` ')
+        return bool(tail and tail[-1] in '.!?')
+
+
 def build_generation_kwargs(
     tokenizer,
     *,
@@ -28,14 +109,17 @@ def build_generation_kwargs(
     do_sample=DEFAULT_SAMPLING_CONFIG['do_sample'],
     temperature=DEFAULT_SAMPLING_CONFIG['temperature'],
     top_p=DEFAULT_SAMPLING_CONFIG['top_p'],
+    top_k=None,
     min_p=DEFAULT_SAMPLING_CONFIG['min_p'],
     repetition_penalty=DEFAULT_SAMPLING_CONFIG['repetition_penalty'],
+    eos_token_id=None,
 ):
     """Build Hugging Face generate() kwargs with safe natural sampling defaults."""
+    resolved_eos = eos_token_id if eos_token_id is not None else getattr(tokenizer, 'eos_token_id', None)
     kwargs = {
         'max_new_tokens': max(1, int(max_new_tokens)),
         'pad_token_id': tokenizer.pad_token_id,
-        'eos_token_id': tokenizer.eos_token_id,
+        'eos_token_id': resolved_eos,
     }
     if do_sample:
         temp = float(temperature)
@@ -48,6 +132,8 @@ def build_generation_kwargs(
             'min_p': float(min_p),
             'repetition_penalty': float(repetition_penalty),
         })
+        if top_k is not None:
+            kwargs['top_k'] = int(top_k)
     else:
         kwargs.update({
             'do_sample': False,
@@ -111,6 +197,8 @@ def make_system(mode, context, memory='', lang='id', persona='', student_name=''
             + memory.strip()
             + '\n' + locale.MEMORY_FOOTER
         )
+    if persona.strip() and hasattr(locale, 'PERSONA_FOOTER'):
+        system += '\n\n' + locale.PERSONA_FOOTER
     system += '\n\n' + locale.LANGUAGE_FOOTER
     return system
 

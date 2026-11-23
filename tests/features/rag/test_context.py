@@ -103,6 +103,27 @@ class RagContextTests(unittest.TestCase):
         related_only = filter_relevant_history('Kenapa centroid K-Means harus dihitung ulang?', history[:2])
         self.assertEqual(len(related_only), 2)
 
+    def test_student_asking_back_about_assistant_question_preserves_history_and_context(self):
+        history = [
+            {'role': 'user', 'content': 'apa itu labeling data?'},
+            {
+                'role': 'assistant',
+                'content': (
+                    'Labeling data adalah proses memberi kategori kepada setiap item data. '
+                    'Menurutmu, apa risiko jika seorang siswa diberi label Salah hanya karena '
+                    'menggambar garis agak miring?'
+                ),
+            },
+        ]
+        reply = 'saya tidak tahu, memangnya risikonya apa?'
+        active = filter_relevant_history(reply, history)
+        self.assertEqual(len(active), 2)
+
+        merged_query = retrieval_query(reply, history[0]['content'], history[1]['content'])
+        self.assertIn('labeling data', merged_query.lower())
+        self.assertIn('risiko', merged_query.lower())
+        self.assertIn(reply, merged_query)
+
 
 if __name__ == '__main__':
     unittest.main()
