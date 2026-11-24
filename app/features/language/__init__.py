@@ -7,6 +7,7 @@ from app.features.language.detector import (
     is_wrong_language,
 )
 from app.features.language.locales import LOCALES, en, id
+from app.features.language.slang import has_slang, normalize_slang
 from app.features.language.translator import (
     bilingual_queries,
     ensure_response_language,
@@ -20,7 +21,9 @@ __all__ = [
     'en',
     'detect_language',
     'format_user_message',
+    'has_slang',
     'is_wrong_language',
+    'normalize_slang',
     'bilingual_queries',
     'ensure_response_language',
     'parse_bilingual_queries',

@@ -5,6 +5,7 @@ import re
 
 from app.features.language.detector import is_wrong_language
 from app.features.language.locales import LOCALES, id
+from app.features.language.slang import normalize_slang
 
 MAX_TRANSLATION_INPUT_TOKENS = 1024
 MAX_REWRITE_INPUT_TOKENS = 2048
@@ -116,7 +117,7 @@ def _format_history_snippet(history, max_chars=450):
 
 def build_bilingual_query_messages(question, history=None):
     """Build messages for history-aware standalone search query rewriting & bilingual translation."""
-    condensed = _condense_search_query(question)
+    condensed = _condense_search_query(normalize_slang(question))
     history_snippet = _format_history_snippet(history)
     if history_snippet:
         system_prompt = (

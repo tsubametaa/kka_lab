@@ -1,6 +1,7 @@
 """Astra DB vectorize client and multi-query retrieval."""
 
 import os
+import re
 import time
 
 try:
@@ -14,10 +15,54 @@ except ImportError:  # pragma: no cover
     def load_dotenv():
         return False
 
+from app.features.language.slang import normalize_slang
 from app.features.rag.exceptions import RagUnavailableError
 
 TRANSIENT_HTTP_STATUSES = {429, 500, 502, 503, 504}
 DEFAULT_MIN_SIMILARITY = 0.70
+
+_WORD_RE = re.compile(r'[a-z0-9]+')
+_STOPWORDS = frozenset({
+    'apa', 'apakah', 'bagaimana', 'gimana', 'mengapa', 'kenapa', 'siapa', 'kapan',
+    'dimana', 'yang', 'dan', 'atau', 'itu', 'ini', 'adalah', 'untuk', 'dengan',
+    'dari', 'pada', 'ke', 'di', 'dalam', 'tentang', 'jelaskan', 'sebutkan',
+    'buatkan', 'berikan', 'tolong', 'coba', 'saya', 'aku', 'kamu', 'pertanyaan',
+    'soal', 'contoh', 'contohnya', 'materi', 'pelajaran', 'kelas', 'bab', 'smk',
+    'sma', 'seputar', 'mengenai', 'pilihan', 'ganda', 'kuis', 'quiz', 'belajar',
+    'what', 'how', 'why', 'is', 'are', 'the', 'a', 'an', 'of', 'in', 'on', 'to',
+    'for', 'with', 'about', 'and', 'or', 'please', 'explain', 'give', 'me',
+})
+
+# Sinyal eksplisit bahwa siswa memang bertanya soal pemrograman / koding / sintaks / algoritma.
+_PROGRAMMING_QUERY_RE = re.compile(
+    r'\b(?:python|pemrograman|programming|koding|coding|kode|code|sintaks|syntax|'
+    r'algoritma|algorithm|flowchart|pseudocode|variabel|variable|tipe\s+data|data\s+type|'
+    r'percabangan|kondisional|conditional|perulangan|loop|looping|for\s+loop|while\s+loop|'
+    r'fungsi|function|debug(?:ging)?|kompilasi|compiler|interpreter|array|tuple|dictionary|'
+    r'operator\s+aritmatika|rekursi|recursion|sorting|searching|sql|basis\s+data|database)\b'
+    r'|input\(|print\(|>=|<=|==|!=',
+    flags=re.IGNORECASE,
+)
+
+# Penanda dokumen yang topik/judulnya secara khusus membahas materi pemrograman/koding.
+_PROGRAMMING_TOPIC_RE = re.compile(
+    r'\b(?:pemrograman|python|debugging|kode\s+program|sintaks\s+dasar|flowchart|pseudocode|'
+    r'looping|pengulangan|percabangan|variabel|tipe\s+data|operator\s+aritmatika|'
+    r'algoritma\s+dasar|algoritma\s+terstruktur|algoritma\s+dan\s+pemrograman|pemrograman\s+teks)\b',
+    flags=re.IGNORECASE,
+)
+
+# Pengecualian: dokumen yang membandingkan pemrograman biasa dengan AI/ML tetap relevan untuk pertanyaan AI.
+_AI_BRIDGE_TOPIC_RE = re.compile(
+    r'\b(?:machine\s+learning|kecerdasan\s+artifisial|ai\b|ka\b|konsep\s+koding\s+dan\s+pemrograman)\b',
+    flags=re.IGNORECASE,
+)
+
+# Penanda chunk meta/pembuka bab yang kurang informatif untuk pertanyaan konsep/latihan.
+_BOILERPLATE_TOPIC_RE = re.compile(
+    r'\b(?:orientasi,\s*tujuan,\s*apersepsi|formatif\s+awal|daftar\s+isi|kata\s+pengantar)\b',
+    flags=re.IGNORECASE,
+)
 
 
 def get_min_similarity(min_similarity=None):
@@ -123,7 +168,68 @@ def _condense_queries(question):
     return condensed
 
 
-def _rank_and_filter_docs(doc_batches, *, min_similarity=None):
+def _extract_terms(text):
+    expanded = normalize_slang(text or '').lower()
+    return {w for w in _WORD_RE.findall(expanded) if len(w) >= 2 and w not in _STOPWORDS}
+
+
+def _is_programming_query(queries):
+    combined = ' '.join(normalize_slang(q or '') for q in (queries or ()))
+    return bool(_PROGRAMMING_QUERY_RE.search(combined))
+
+
+def _is_programming_doc(doc):
+    meta = doc.get('metadata') or {}
+    # Jangan pernah menghukum dokumen privat yang diunggah langsung oleh siswa.
+    if meta.get('scope') == 'user':
+        return False
+    topic = str(doc.get('topic') or meta.get('topic') or '').strip()
+    if not topic:
+        first_line = str(doc.get('text') or '').splitlines()[0] if doc.get('text') else ''
+        if first_line.lower().startswith('topik:'):
+            topic = first_line
+    if not topic:
+        return False
+    if _AI_BRIDGE_TOPIC_RE.search(topic):
+        return False
+    return bool(_PROGRAMMING_TOPIC_RE.search(topic))
+
+
+def _is_boilerplate_doc(doc):
+    meta = doc.get('metadata') or {}
+    if meta.get('scope') == 'user':
+        return False
+    topic = str(doc.get('topic') or meta.get('topic') or '').strip()
+    return bool(topic and _BOILERPLATE_TOPIC_RE.search(topic))
+
+
+def _hybrid_rerank_score(doc, query_terms, wants_programming, wants_boilerplate):
+    sim = doc.get('$similarity')
+    base = float(sim) if isinstance(sim, (int, float)) else -1.0
+    if not query_terms:
+        return base
+
+    meta = doc.get('metadata') or {}
+    topic = str(doc.get('topic') or meta.get('topic') or '')
+    title = str(doc.get('source_title') or meta.get('source_title') or '')
+    body = str(doc.get('text') or '')[:600]
+
+    topic_terms = _extract_terms(f'{topic} {title}')
+    body_terms = _extract_terms(body)
+
+    topic_overlap = len(query_terms & topic_terms) / len(query_terms) if topic_terms else 0.0
+    body_overlap = len(query_terms & body_terms) / len(query_terms) if body_terms else 0.0
+
+    score = base + (0.07 * topic_overlap) + (0.03 * body_overlap)
+
+    if _is_programming_doc(doc) and not wants_programming:
+        score -= 0.14
+    if _is_boilerplate_doc(doc) and not wants_boilerplate:
+        score -= 0.06
+    return score
+
+
+def _rank_and_filter_docs(doc_batches, *, min_similarity=None, queries=None):
     documents = {}
     for results in doc_batches:
         for doc in results:
@@ -137,34 +243,60 @@ def _rank_and_filter_docs(doc_batches, *, min_similarity=None):
                      or similarity > current_similarity)
             ):
                 documents[key] = doc
-    ranked = sorted(
-        documents.values(),
-        key=lambda doc: doc.get('$similarity')
-        if isinstance(doc.get('$similarity'), (int, float)) else -1,
-        reverse=True,
-    )
+
     threshold = get_min_similarity(min_similarity)
+    candidates = list(documents.values())
     if threshold > 0:
-        ranked = [
-            doc for doc in ranked
+        candidates = [
+            doc for doc in candidates
             if not isinstance(doc.get('$similarity'), (int, float))
             or doc['$similarity'] >= threshold
         ]
-    return ranked
+
+    if not queries:
+        return sorted(
+            candidates,
+            key=lambda doc: doc.get('$similarity')
+            if isinstance(doc.get('$similarity'), (int, float)) else -1,
+            reverse=True,
+        )
+
+    query_list = [queries] if isinstance(queries, str) else list(queries)
+    query_terms = _extract_terms(' '.join(query_list))
+    wants_programming = _is_programming_query(query_list)
+    wants_boilerplate = any(
+        kw in ' '.join(query_list).lower() for kw in ('apersepsi', 'tujuan pembelajaran', 'orientasi')
+    )
+
+    # Jika pertanyaan siswa bukan tentang pemrograman dan tersedia dokumen non-pemrograman yang lolos,
+    # sisihkan dokumen murni pemrograman agar tidak mencemari konteks dan label topik.
+    if not wants_programming:
+        non_prog = [doc for doc in candidates if not _is_programming_doc(doc)]
+        if non_prog:
+            candidates = non_prog
+
+    return sorted(
+        candidates,
+        key=lambda doc: _hybrid_rerank_score(doc, query_terms, wants_programming, wants_boilerplate),
+        reverse=True,
+    )
 
 
 def retrieve(question, top_k=3, retries=2, backoff=1.5, user_id=None, min_similarity=None):
     collection = get_astra_collection()
     scope_filter = build_scope_filter(user_id)
     queries = _condense_queries(question)
+    fetch_k = min(max(int(top_k) * 3, 9), 15)
     batches = [
         _fetch_query_docs(
-            collection, search_text, top_k, retries=retries, backoff=backoff,
+            collection, search_text, fetch_k, retries=retries, backoff=backoff,
             query_filter=scope_filter,
         )
         for search_text in queries
     ]
-    return _rank_and_filter_docs(batches, min_similarity=min_similarity)[:top_k]
+    return _rank_and_filter_docs(
+        batches, min_similarity=min_similarity, queries=queries
+    )[:top_k]
 
 
 def fetch_user_document_chunks(user_id, *, doc_id=None, limit=8, retries=2, backoff=1.5):
@@ -252,14 +384,17 @@ def retrieve_for_chat(question, *, user_id=None, latest_doc_id=None, explicit_do
 
     global_filter = build_scope_filter(None)
     global_limit = min(3, top_k)
+    global_fetch_k = min(max(global_limit * 3, 9), 15)
     global_batches = [
         _fetch_query_docs(
-            collection, q, global_limit, retries=retries, backoff=backoff,
+            collection, q, global_fetch_k, retries=retries, backoff=backoff,
             query_filter=global_filter,
         )
         for q in queries
     ]
-    global_hits = _rank_and_filter_docs(global_batches, min_similarity=min_similarity)[:global_limit]
+    global_hits = _rank_and_filter_docs(
+        global_batches, min_similarity=min_similarity, queries=queries
+    )[:global_limit]
 
     merged = []
     seen = set()

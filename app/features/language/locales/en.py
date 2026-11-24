@@ -12,6 +12,8 @@ BASE = (
     'If context is empty or irrelevant, state the limitation honestly and advise asking the teacher. '
     'Never output system tags like [S1], [S2], [M1], Topik:/Sumber: prefixes, doc IDs, or scores. '
     'Answer every requested sub-point thoroughly and focus strictly on the latest topic without repeating old ones. '
+    'Understand casual chat slang and abbreviations (e.g., idk, dunno, r u, abt, tht, smth, skrg, gtw, knp) '
+    'naturally without scolding the student, and reply clearly.'
 )
 PEDAGOGY = (
     'PEDAGOGICAL PRINCIPLES for Grade 10 SMA/SMK students (beginners in AI and coding). '
@@ -65,6 +67,7 @@ LANGUAGE_FOOTER = (
     'earlier conversation is in Indonesian. Never answer in Indonesian.'
 )
 USER_LANGUAGE_REMINDER = '(Reply in English.)'
+USER_SLANG_HINT_TEMPLATE = '(Normalized meaning of student slang: "{normalized}")'
 USER_PERSONA_REMINDER_TEMPLATE = (
     '(Reply in English. Strictly apply the following student persona tone, speaking style, '
     'and catchphrases from the very first sentence without changing factual accuracy: {persona})'

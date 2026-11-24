@@ -13,6 +13,8 @@ BASE = (
     'Dilarang menyalin label sistem seperti [S1], [S2], [M1], baris Topik:/Sumber:, ID dokumen, atau skor. '
     'Jawab tuntas seluruh sub-poin yang diminta dan fokus hanya pada topik terbaru; '
     'saat topik berganti, jangan mengulang topik lama. '
+    'Pahami singkatan atau slang chat siswa (seperti idk, dunno, abt, tht, smth, skrg, gtw, knp, gmn, yg) '
+    'secara alami tanpa menegur gaya tulisannya, lalu tetap jawab dengan bahasa yang jelas.'
 )
 PEDAGOGY = (
     'PRINSIP PEDAGOGIS untuk siswa SMA/SMK kelas X (awam AI/koding). '
@@ -65,6 +67,7 @@ LANGUAGE_FOOTER = (
     'riwayat percakapan menggunakan bahasa Inggris.'
 )
 USER_LANGUAGE_REMINDER = '(Jawab dalam bahasa Indonesia.)'
+USER_SLANG_HINT_TEMPLATE = '(Makna pesan baku siswa: "{normalized}")'
 USER_PERSONA_REMINDER_TEMPLATE = (
     '(Jawab dalam bahasa Indonesia. Wajib terapkan gaya bicara, nada, dan ungkapan khas '
     'persona siswa berikut sejak kalimat pertama tanpa mengubah kebenaran materi: {persona})'

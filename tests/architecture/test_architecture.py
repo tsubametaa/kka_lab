@@ -32,7 +32,9 @@ from app.features.language import (
     detect_language,
     ensure_response_language,
     format_user_message,
+    has_slang,
     is_wrong_language,
+    normalize_slang,
     parse_bilingual_queries,
 )
 from app.features.language.detector import detect_language as detector_detect_lang
@@ -52,6 +54,13 @@ from app.features.ocr import (
     clean_ocr_markdown,
     parse_pages_to_markdown,
     render_document_pages,
+)
+from app.features.persona import (
+    PersonaCommand,
+    aresolve_persona_command,
+    clean_persona,
+    detect_persona_command,
+    resolve_persona_command,
 )
 from app.features.rag import (
     DocumentChunk,
@@ -109,6 +118,8 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIs(detect_language, detector_detect_lang)
         self.assertEqual(detect_language('What is machine learning?'), 'en')
         self.assertEqual(detect_language('Apa itu machine learning?'), 'id')
+        self.assertEqual(normalize_slang('r u know abt tht'), 'do you know about that')
+        self.assertTrue(has_slang('gtw knp skrg'))
 
     def test_memory_feature_exports(self):
         self.assertIs(ChatStore, memory_chat_store)
@@ -133,6 +144,15 @@ class ArchitectureTests(unittest.TestCase):
         self.assertTrue(callable(render_document_pages))
         self.assertEqual(clean_ocr_markdown('Halo<｜end▁of▁sentence｜>'), 'Halo')
 
+    def test_persona_feature_exports(self):
+        self.assertTrue(issubclass(PersonaCommand, object))
+        self.assertTrue(callable(clean_persona))
+        self.assertTrue(callable(detect_persona_command))
+        self.assertTrue(callable(resolve_persona_command))
+        self.assertTrue(callable(aresolve_persona_command))
+        cmd = detect_persona_command('mulai sekarang panggil aku ntik karena aku femboy cantik')
+        self.assertEqual(cmd.action, 'set')
+
     def test_web_api_routes_inclusion(self):
         from app.features.chat.router import router as chat_router
         from app.features.memory.router import router as memory_router
@@ -147,6 +167,7 @@ class ArchitectureTests(unittest.TestCase):
 
         self.assertIn('/api/health', api_routes)
         self.assertIn('/api/chat', chat_routes)
+        self.assertIn('/api/chat/suggestions', chat_routes)
         self.assertIn('/api/users/{user_id}/knowledge', memory_routes)
         self.assertIn('/api/users/{user_id}/memory', memory_routes)
         self.assertIn('/api/rag/documents', rag_routes)

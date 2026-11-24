@@ -4,7 +4,9 @@ import unittest
 
 from app.features.rag import (
     build_context,
+    extract_context_topics,
     filter_relevant_history,
+    is_document_reference_query,
     is_follow_up_question,
     resolve_query_topic,
     retrieval_query,
@@ -37,6 +39,8 @@ class RagContextTests(unittest.TestCase):
         self.assertNotIn('Kalimat tambahan', ctx)
         self.assertEqual(sources[0]['label'], 'S1')
         self.assertEqual(sources[0]['pages_pdf'], [3])
+        self.assertEqual(sources[0]['topic'], 'Prompt Engineering')
+        self.assertEqual(extract_context_topics(sources), ['Prompt Engineering'])
 
     def test_build_context_strips_page_markers_while_keeping_template_placeholders(self):
         tok = WordTokenizer()

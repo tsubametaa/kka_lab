@@ -20,6 +20,13 @@ from app.features.chat.prompts import (
     resolve_max_prompt_tokens,
 )
 
+from app.features.chat.suggestions import (
+    DiscussionSuggestion,
+    build_discussion_suggestions,
+    build_suggestion_reply_context,
+    is_topic_suggestion_request,
+)
+
 def __getattr__(name):
     if name == 'LocalAssistant':
         from app.features.chat.assistant import LocalAssistant
@@ -50,6 +57,10 @@ __all__ = [
     'make_system',
     'count_prompt_tokens',
     'fit_messages_to_budget',
+    'DiscussionSuggestion',
+    'build_discussion_suggestions',
+    'build_suggestion_reply_context',
+    'is_topic_suggestion_request',
     'LocalAssistant',
     'ChatRequest',
     'chat_router',

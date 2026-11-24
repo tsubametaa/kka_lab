@@ -52,11 +52,13 @@ from app.features.language.detector import (
 )
 from app.features.language.locales import LOCALES, id as id_locale
 from app.features.language.translator import (
+    _generate_local_text,
     bilingual_queries,
     build_bilingual_query_messages,
     ensure_response_language,
     parse_bilingual_queries,
 )
+from app.features.persona.extractor import build_persona_extractor_messages
 
 
 def _is_cuda_oom(exc):
@@ -147,6 +149,14 @@ class LocalAssistant:
     def translate_queries(self, query, history=None):
         with self.gpu_lock:
             return bilingual_queries(query, self.model, self.tokenizer, history=history)
+
+    def extract_persona(self, text):
+        messages = build_persona_extractor_messages(text)
+        with self.gpu_lock:
+            return _generate_local_text(
+                messages, self.model, self.tokenizer,
+                max_input_tokens=1024, max_new_tokens=160,
+            ) or ''
 
     def _sampling_for_request(self, persona=''):
         """Use Qwen3-Instruct-2507 recommended sampling when custom persona is active."""
@@ -430,6 +440,13 @@ class VLLMAssistant:
         except Exception:
             return [condensed]
         return parse_bilingual_queries(raw, condensed)
+
+    async def aextract_persona(self, text):
+        messages = build_persona_extractor_messages(text)
+        try:
+            return await self._chat_complete(messages, max_tokens=160, temperature=0.0)
+        except Exception:
+            return ''
 
     async def aanswer(self, question, mode, history, context, memory='', lang=None, persona='', student_name=''):
         messages, target_lang = self._build_messages(

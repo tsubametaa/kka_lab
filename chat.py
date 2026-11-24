@@ -11,8 +11,11 @@ from app.features.chat import (
     DEFAULT_MAX_NEW_TOKENS,
     DEFAULT_MAX_PROMPT_TOKENS,
     DEFAULT_SAMPLING_CONFIG,
+    build_discussion_suggestions,
     build_generation_kwargs,
+    build_suggestion_reply_context,
     fit_messages_to_budget,
+    is_topic_suggestion_request,
     make_system,
     resolve_max_prompt_tokens,
 )
@@ -23,7 +26,15 @@ from app.features.language import (
     ensure_response_language,
     format_user_message,
 )
-from app.features.persona import PersonaError, clean_persona
+from app.features.language.translator import _generate_local_text
+from app.features.persona import (
+    PersonaError,
+    build_persona_confirmation_context,
+    build_persona_extractor_messages,
+    build_persona_rejection_reply,
+    clean_persona,
+    resolve_persona_command,
+)
 from app.features.rag import (
     RagUnavailableError,
     build_context,
@@ -117,7 +128,25 @@ def format_similarity(value):
     return f'{value:.3f}' if isinstance(value, (int, float)) else '-'
 
 
+class _CliPersonaHelper:
+    def __init__(self, llm_model, llm_tokenizer):
+        self.model = llm_model
+        self.tokenizer = llm_tokenizer
+
+    def extract_persona(self, text):
+        return _generate_local_text(
+            build_persona_extractor_messages(text),
+            self.model,
+            self.tokenizer,
+            max_input_tokens=1024,
+            max_new_tokens=160,
+        ) or ''
+
+
+cli_persona_helper = _CliPersonaHelper(model, tokenizer)
+
 history, context, sources, topic = [], '', [], ''
+pending_suggestions = []
 session_rag_loaded = False
 
 # Inisialisasi penyimpanan riwayat obrolan di Astra DB
@@ -127,6 +156,10 @@ if not args.no_astra_history:
     try:
         from app.features.memory.astra_store import AstraChatStore
         astra_store = AstraChatStore()
+        if not persona:
+            saved_persona = astra_store.get_persona(args.user_id)
+            if saved_persona:
+                persona = saved_persona
         if session_id:
             loaded_history = astra_store.history(session_id, limit=args.max_history)
             if loaded_history:
@@ -143,6 +176,7 @@ if not args.no_astra_history:
 
 print('Siap. /baru = sesi baru; /keluar = berhenti.')
 print('/persona <gaya> = atur gaya jawaban; /persona = lihat; /persona hapus = kembali normal.')
+print('Tips: Anda juga bisa langsung mengetik instruksi persona di chat (mis. "mulai sekarang panggil aku ...").')
 if persona:
     print('Persona aktif:', persona)
 if rag_strategy == 'per_pertanyaan':
@@ -155,6 +189,7 @@ while True:
         break
     if question == '/baru':
         history, context, sources, topic = [], '', [], ''
+        pending_suggestions = []
         session_rag_loaded = False
         if astra_store:
             session_id = astra_store.create_session(args.user_id)
@@ -168,23 +203,85 @@ while True:
             print('Persona aktif:', persona or '(tidak ada)')
         elif value.casefold() in ('hapus', 'reset', 'off'):
             persona = ''
+            if astra_store:
+                try:
+                    astra_store.delete_persona(args.user_id)
+                except Exception:
+                    pass
             print('Persona dihapus; gaya jawaban kembali normal.')
         else:
             try:
                 persona = clean_persona(value)
+                if astra_store:
+                    try:
+                        astra_store.save_persona(args.user_id, persona)
+                    except Exception:
+                        pass
                 print('Persona disimpan untuk sesi ini:', persona)
             except PersonaError as err:
                 print('Persona ditolak:', err)
         continue
     if not question:
         continue
+
+    if pending_suggestions and question.isdigit():
+        pick = int(question) - 1
+        if 0 <= pick < len(pending_suggestions):
+            chosen = pending_suggestions[pick]
+            question = chosen['prompt']
+            print(f'[Rekomendasi #{pick + 1} dipilih]: {question}')
+        pending_suggestions = []
+
+    recent = history[-2 * args.max_history:] if args.max_history > 0 else []
+    persona_cmd = resolve_persona_command(question, assistant=cli_persona_helper)
+    pure_persona_turn = persona_cmd.is_persona_command and not persona_cmd.remainder
+    effective_question = (
+        persona_cmd.remainder
+        if (persona_cmd.action in ('set', 'reset') and persona_cmd.remainder)
+        else question
+    )
+    lang = detect_language(effective_question, recent)
+    suggestion_turn = (not pure_persona_turn) and is_topic_suggestion_request(effective_question)
+
+    if persona_cmd.action == 'set':
+        persona = persona_cmd.persona
+        if astra_store:
+            try:
+                astra_store.save_persona(args.user_id, persona)
+            except Exception:
+                pass
+        print(f'[persona otomatis aktif]: {persona}')
+    elif persona_cmd.action == 'reset':
+        persona = ''
+        if astra_store:
+            try:
+                astra_store.delete_persona(args.user_id)
+            except Exception:
+                pass
+        print('[persona otomatis dihapus; gaya jawaban kembali normal]')
+    elif persona_cmd.action == 'rejected':
+        answer = build_persona_rejection_reply(persona_cmd, lang=lang)
+        print('\nAsisten:', answer)
+        continue
+
     query = None
     rag_error = None
-    if rag_strategy == 'sumber_tetap':
+    turn_suggestions = []
+    if pure_persona_turn:
+        context = build_persona_confirmation_context(persona_cmd, lang=lang)
+        sources = []
+    elif suggestion_turn:
+        user_docs = astra_store.list_user_documents(args.user_id) if astra_store else []
+        turn_suggestions = build_discussion_suggestions(
+            lang=lang, history=recent, user_docs=user_docs
+        )
+        context = build_suggestion_reply_context(turn_suggestions, lang=lang)
+        sources = []
+    elif rag_strategy == 'sumber_tetap':
         if not context:
             context, sources = build_context(fixed_docs, tokenizer)
     elif rag_strategy == 'per_pertanyaan' or (rag_strategy == 'per_sesi' and not session_rag_loaded):
-        query, topic = resolve_query_topic(question, topic)
+        query, topic = resolve_query_topic(effective_question, topic)
         search_queries = bilingual_queries(query, model, tokenizer)
         try:
             context, sources = build_context(retrieve(search_queries), tokenizer)
@@ -194,9 +291,7 @@ while True:
             print(f'\n[peringatan] {rag_error}')
             print('[peringatan] Menjawab sementara tanpa konteks materi RAG.')
             context, sources = '', []
-    recent = history[-2 * args.max_history:] if args.max_history > 0 else []
-    lang = detect_language(question, recent)
-    user_message = format_user_message(question, lang)
+    user_message = format_user_message(effective_question, lang, persona=persona)
     started = time.perf_counter()
     budget = max_prompt_tokens
     oom_cls = getattr(torch.cuda, 'OutOfMemoryError', ())
@@ -252,6 +347,13 @@ while True:
     )
     seconds = round(time.perf_counter() - started, 3)
     print('\nAsisten:', answer)
+    if turn_suggestions:
+        pending_suggestions = turn_suggestions
+        print('\n💡 Rekomendasi topik diskusi (ketik angka untuk langsung mengirim):')
+        for idx, item in enumerate(turn_suggestions, start=1):
+            print(f'   [{idx}] {item["label"]}')
+    else:
+        pending_suggestions = []
     if args.debug:
         print('\n[debug] Sumber:', ', '.join(
             f'[{s["label"]}] {s["title"]} (skor {format_similarity(s.get("similarity"))})'

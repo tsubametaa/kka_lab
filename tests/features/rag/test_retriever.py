@@ -235,6 +235,98 @@ class RagRetrieverTests(unittest.TestCase):
         self.assertEqual(docs[1]['_id'], 'doc_u1:0001')
         self.assertTrue(all((d.get('metadata') or {}).get('scope') == 'user' for d in docs))
 
+    def test_non_programming_query_demotes_and_filters_stray_programming_chunks(self):
+        fake_docs = [
+            {
+                '_id': 'prog-1',
+                'topic': 'Bab 2 — Algoritma dan Pemrograman Lanjut — Analisis Kesalahan (Debugging) dalam Kode Program',
+                'source_title': 'Koding dan Kecerdasan Artifisial untuk SMA/MA Kelas X',
+                'text': 'Latihan soal pilihan ganda tentang debugging kode error.',
+                '$similarity': 0.84,
+            },
+            {
+                '_id': 'prog-2',
+                'topic': 'BAB II Pemrograman Dasar dengan Python — Evaluasi',
+                'source_title': 'Buku Materi KKA',
+                'text': 'Evaluasi pilihan ganda Python dasar.',
+                '$similarity': 0.82,
+            },
+            {
+                '_id': 'ai-1',
+                'topic': 'Konsep dasar kecerdasan artifisial',
+                'source_title': 'Modul 1 KKA',
+                'text': 'Kecerdasan artifisial (KA) adalah sistem yang belajar dari data untuk memprediksi atau menghasilkan konten.',
+                '$similarity': 0.78,
+            },
+            {
+                '_id': 'ai-2',
+                'topic': 'Pertemuan 2 — Cara Kerja KA: Prediksi & Generatif — Ketika KA Keliru',
+                'source_title': 'Pertemuan 2',
+                'text': 'Ketika data latih tidak akurat, prediksi KA dapat keliru atau menghasilkan error data.',
+                '$similarity': 0.77,
+            },
+        ]
+        with (
+            patch('app.features.rag.retriever.get_astra_collection', return_value=object()),
+            patch('app.features.rag.retriever._fetch_query_docs', return_value=fake_docs),
+        ):
+            docs = retrieve(
+                'risiko data latih tidak akurat dan error pada prediksi KA',
+                top_k=3, retries=0, backoff=0,
+            )
+        ids = [d['_id'] for d in docs]
+        self.assertEqual(ids[0], 'ai-2')
+        self.assertNotIn('prog-1', ids)
+        self.assertNotIn('prog-2', ids)
+
+    def test_explicit_programming_query_keeps_programming_chunks_at_top(self):
+        fake_docs = [
+            {
+                '_id': 'ai-1',
+                'topic': 'Konsep dasar kecerdasan artifisial',
+                'source_title': 'Modul 1 KKA',
+                'text': 'Konsep kecerdasan artifisial di kehidupan sehari-hari.',
+                '$similarity': 0.80,
+            },
+            {
+                '_id': 'prog-py',
+                'topic': 'BAB II Pemrograman Dasar dengan Python — Looping atau Pengulangan',
+                'source_title': 'Buku Materi KKA',
+                'text': 'Perulangan for dan while di Python menjalankan blok kode berulang.',
+                '$similarity': 0.79,
+            },
+        ]
+        with (
+            patch('app.features.rag.retriever.get_astra_collection', return_value=object()),
+            patch('app.features.rag.retriever._fetch_query_docs', return_value=fake_docs),
+        ):
+            docs = retrieve('jelaskan perulangan for di Python', top_k=2, retries=0, backoff=0)
+        self.assertEqual(docs[0]['_id'], 'prog-py')
+
+    def test_boilerplate_orientation_chunk_ranked_below_substantive_topic(self):
+        fake_docs = [
+            {
+                '_id': 'meta-1',
+                'topic': 'Bab 3 — Literasi dan Etika Kecerdasan Artifisial — Orientasi, tujuan, apersepsi, dan formatif awal',
+                'source_title': 'Buku KKA',
+                'text': 'Pada bab ini siswa mempelajari tujuan pembelajaran etika AI.',
+                '$similarity': 0.81,
+            },
+            {
+                '_id': 'core-1',
+                'topic': 'Bab 3 — Literasi dan Etika Kecerdasan Artifisial — Dampak Pemanfaatan Kecerdasan Artifisial',
+                'source_title': 'Buku KKA',
+                'text': 'Dampak pemanfaatan kecerdasan artifisial mencakup privasi data dan etika penggunaan.',
+                '$similarity': 0.79,
+            },
+        ]
+        with (
+            patch('app.features.rag.retriever.get_astra_collection', return_value=object()),
+            patch('app.features.rag.retriever._fetch_query_docs', return_value=fake_docs),
+        ):
+            docs = retrieve('apa dampak dan etika pemanfaatan kecerdasan artifisial?', top_k=2, retries=0, backoff=0)
+        self.assertEqual(docs[0]['_id'], 'core-1')
+
 
 if __name__ == '__main__':
     unittest.main()

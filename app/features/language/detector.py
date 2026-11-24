@@ -3,6 +3,7 @@
 import re
 
 from app.features.language.locales import LOCALES, en, id
+from app.features.language.slang import has_slang, normalize_slang
 
 _DEFINITION_QUERY_RE = re.compile(
     r'\b(?:means?|meaning|stands?\s+for|arti(?:nya)?|kepanjangan(?:nya)?|singkatan)\b',
@@ -50,10 +51,11 @@ _WORD_RE = re.compile(r"[a-zA-ZÀ-ÿ]+(?:'[a-zA-Z]+)?")
 
 
 def _explicit_language_request(text):
-    match_en = _EXPLICIT_EN_RE.search(text)
+    normalized = normalize_slang(text or '')
+    match_en = _EXPLICIT_EN_RE.search(normalized)
     if match_en and not _DEFINITION_QUERY_RE.search(match_en.group('span_en')):
         return 'en'
-    match_id = _EXPLICIT_ID_RE.search(text)
+    match_id = _EXPLICIT_ID_RE.search(normalized)
     if match_id and not _DEFINITION_QUERY_RE.search(match_id.group('span_id')):
         return 'id'
     return None
@@ -62,7 +64,7 @@ def _explicit_language_request(text):
 def _language_scores(text):
     if not text or not text.strip():
         return 0.0, 0.0
-    normalized = text.replace('’', "'").replace('`', "'").casefold()
+    normalized = normalize_slang(text).replace('’', "'").replace('`', "'").casefold()
     id_score = 0.0
     en_score = 0.0
 
@@ -113,7 +115,7 @@ def detect_language(text, history=None, default='id'):
 
 
 def format_user_message(question, lang, persona=''):
-    """Attach a transient language (+ optional persona) reminder without altering stored history."""
+    """Attach a transient language (+ optional slang/persona) reminder without altering stored history."""
     locale = LOCALES.get(lang, id)
     clean_persona = re.sub(r'\s+', ' ', (persona or '')).strip()
     if clean_persona and hasattr(locale, 'USER_PERSONA_REMINDER_TEMPLATE'):
@@ -123,7 +125,11 @@ def format_user_message(question, lang, persona=''):
     stripped = question.strip()
     if stripped.endswith(reminder):
         return stripped
-    return f'{stripped}\n\n{reminder}'
+    slang_hint = ''
+    if has_slang(stripped) and hasattr(locale, 'USER_SLANG_HINT_TEMPLATE'):
+        norm_text = re.sub(r'\s+', ' ', normalize_slang(stripped)).strip()[:400]
+        slang_hint = locale.USER_SLANG_HINT_TEMPLATE.format(normalized=norm_text) + '\n'
+    return f'{stripped}\n\n{slang_hint}{reminder}'
 
 
 def is_wrong_language(text, expected_lang):

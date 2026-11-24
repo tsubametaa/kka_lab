@@ -1,5 +1,18 @@
 """Persona feature package: student-defined answer style (tone only)."""
 
+from app.features.persona.extractor import (
+    PersonaCommand,
+    aresolve_persona_command,
+    build_persona_confirmation_context,
+    build_persona_extractor_messages,
+    build_persona_rejection_reply,
+    detect_persona_command,
+    is_auto_persona_enabled,
+    is_auto_persona_llm_enabled,
+    might_be_persona_instruction,
+    parse_llm_persona_command,
+    resolve_persona_command,
+)
 from app.features.persona.validator import MAX_PERSONA_CHARS, PersonaError, clean_persona
 
 
@@ -12,9 +25,20 @@ def __getattr__(name):
 
 __all__ = [
     'MAX_PERSONA_CHARS',
+    'PersonaCommand',
     'PersonaError',
+    'aresolve_persona_command',
+    'build_persona_confirmation_context',
+    'build_persona_extractor_messages',
+    'build_persona_rejection_reply',
     'clean_persona',
+    'detect_persona_command',
+    'is_auto_persona_enabled',
+    'is_auto_persona_llm_enabled',
+    'might_be_persona_instruction',
+    'parse_llm_persona_command',
     'persona_router',
     'PersonaRequest',
+    'resolve_persona_command',
 ]
 

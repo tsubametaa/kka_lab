@@ -2,6 +2,7 @@
 
 import re
 
+from app.features.language.slang import normalize_slang
 from app.features.memory.gate import _knowledge_terms, normalize_question
 
 SHORT_QUESTION_WORDS = 6
@@ -69,7 +70,7 @@ def _stemmed_terms(text):
 
 
 def _has_anaphoric_cue(question):
-    words = normalize_question(question).split()
+    words = normalize_question(normalize_slang(question)).split()
     return any(w in _ANAPHORIC_CUES for w in words)
 
 
@@ -77,15 +78,16 @@ def _is_assistant_reply(question, prev_assistant=''):
     """Deteksi apakah siswa menjawab atau bertanya balik terhadap pertanyaan asisten sebelumnya."""
     if not question or not question.strip():
         return False
-    normalized = normalize_question(question)
+    expanded = normalize_slang(question)
+    normalized = normalize_question(expanded)
     if not normalized:
         return False
-    if _STANDALONE_OPENER_RE.search(question):
+    if _STANDALONE_OPENER_RE.search(expanded):
         return False
     if any(phrase in normalized for phrase in _ASSISTANT_REPLY_PHRASES):
         return True
     if prev_assistant and '?' in prev_assistant:
-        q_stems = _stemmed_terms(question)
+        q_stems = _stemmed_terms(expanded)
         a_stems = _stemmed_terms(prev_assistant)
         if q_stems & a_stems:
             return True
@@ -120,12 +122,13 @@ def is_follow_up_question(question, topic=''):
     if not topic or not topic.strip() or not question or not question.strip():
         return False
 
-    q_words = normalize_question(question).split()
+    expanded = normalize_slang(question)
+    q_words = normalize_question(expanded).split()
     if not q_words:
         return False
 
-    q_terms = _stemmed_terms(question)
-    t_terms = _stemmed_terms(topic)
+    q_terms = _stemmed_terms(expanded)
+    t_terms = _stemmed_terms(normalize_slang(topic))
 
     # 1. Ada irisan istilah kunci dengan pertanyaan sebelumnya -> masih satu topik
     if q_terms & t_terms:
@@ -137,11 +140,11 @@ def is_follow_up_question(question, topic=''):
         return True
 
     # 3. Penanda anafora/lanjutan eksplisit ("contohnya di Python?", "how does it work?")
-    if _has_anaphoric_cue(question):
+    if _has_anaphoric_cue(expanded):
         return True
 
     # 4. Pertanyaan pembuka mandiri dengan istilah topik baru yang tak beririsan -> topik baru
-    if _STANDALONE_OPENER_RE.search(question):
+    if _STANDALONE_OPENER_RE.search(expanded):
         return False
 
     # 5. Pertanyaan panjang (>= 6 kata) tanpa keterkaitan di atas -> topik mandiri/baru
@@ -292,6 +295,48 @@ def is_document_reference_query(question, user_docs=None):
     return False
 
 
+_LEADING_TOPIC_VALUE_RE = re.compile(
+    r'^\s*Topik\s*:\s*([^|\n]+)',
+    re.IGNORECASE,
+)
+
+
+def _extract_doc_topic(doc, raw_text=''):
+    """Extract clean human-readable topic label from RAG document metadata or leading header."""
+    meta = doc.get('metadata') or {}
+    for candidate in (doc.get('topic'), meta.get('topic')):
+        cleaned = ' '.join(str(candidate or '').split()).strip()
+        if cleaned:
+            return cleaned[:120]
+    first_line = (raw_text or '').splitlines()[0] if raw_text else ''
+    match = _LEADING_TOPIC_VALUE_RE.match(first_line)
+    if match:
+        cleaned = ' '.join(match.group(1).split()).strip()
+        if cleaned:
+            return cleaned[:120]
+    return ''
+
+
+def extract_context_topics(sources, max_topics=3):
+    """Return deduplicated, relevance-ordered context topic labels from RAG sources."""
+    topics = []
+    seen = set()
+    for src in sources or ():
+        if not isinstance(src, dict):
+            continue
+        raw = ' '.join(str(src.get('topic') or '').split()).strip()
+        if not raw:
+            continue
+        key = raw.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        topics.append(raw)
+        if len(topics) >= max_topics:
+            break
+    return topics
+
+
 def build_context(docs, tokenizer, max_tokens=900):
     blocks, sources = [], []
     used = 0
@@ -300,6 +345,7 @@ def build_context(docs, tokenizer, max_tokens=900):
         raw_text = str(doc.get('text', '')).strip()
         if not raw_text:
             continue
+        doc_topic = _extract_doc_topic(doc, raw_text)
         text = _clean_chunk_text(raw_text)
         title = str(doc.get('source_title') or meta.get('source_title') or 'Materi KKA')[:140]
         tag = f'S{len(sources) + 1}'
@@ -316,7 +362,7 @@ def build_context(docs, tokenizer, max_tokens=900):
         used += len(header_ids) + body_tokens + 4
         sources.append({
             'label': tag, 'id': str(doc.get('_id', '')),
-            'title': title, 'similarity': doc.get('$similarity'),
+            'title': title, 'topic': doc_topic, 'similarity': doc.get('$similarity'),
             'pages_pdf': doc.get('pages_pdf') or meta.get('pages_pdf'),
             'scope': 'user' if is_user_doc else (meta.get('scope') or 'global'),
         })
