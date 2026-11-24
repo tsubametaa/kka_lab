@@ -150,7 +150,6 @@ def make_title(first_question: str) -> str:
     cleaned = " ".join(first_question.strip().split())
     return cleaned[:60] if len(cleaned) > 60 else cleaned
 
-
 def write_csv(path_out: Path, rows: list[dict]) -> None:
     if not rows:
         return
@@ -158,7 +157,6 @@ def write_csv(path_out: Path, rows: list[dict]) -> None:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
-
 
 def build_subset(raw: dict, filter_mode: str):
     out = {
@@ -265,7 +263,6 @@ def build_subset(raw: dict, filter_mode: str):
     }
     return out, csv_rows, removed_log
 
-
 def main() -> None:
     assert not (set(PROMPT_INJECTION_RULES) & set(DELETE_RULES))
     raw = json.loads(RAW_PATH.read_text(encoding="utf-8"))
@@ -290,7 +287,6 @@ def main() -> None:
     print("CLEAN:", clean_data["summary"])
     print("INJ  :", inj_data["summary"])
     print(f"Deleted: {len(deleted_items)} | Separated (Prompt Injection): {len(inj_items)}")
-
 
 if __name__ == "__main__":
     main()

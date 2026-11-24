@@ -18,7 +18,6 @@ from scipy import stats
 ROOT = Path(__file__).resolve().parents[2]
 PRETEST_CSV = ROOT / "docs" / "nilai_pretest.csv"
 
-
 def load_pretest(path: Path) -> tuple[list[float], list[float]]:
     umum, terstruktur = [], []
     with open(path, "r", encoding="utf-8-sig") as f:
@@ -59,7 +58,6 @@ def frequency_distribution(values: list[float]) -> list[tuple[str, int, float]]:
     n = len(values)
     return [(label, sum(1 for x in values if fn(x)), sum(1 for x in values if fn(x)) / n * 100) for label, fn in bins]
 
-
 def main() -> None:
     umum, terstruktur = load_pretest(PRETEST_CSV)
     gabungan = umum + terstruktur
@@ -91,7 +89,6 @@ def main() -> None:
     print(f"Levene Homogenitas       : F = {lev.statistic:.3f}, p = {lev.pvalue:.4f}")
     print(f"Mann-Whitney U           : U = {mwu.statistic:.1f}, p = {mwu.pvalue:.4f}")
     print(f"Welch t-test (pembanding): t = {welch.statistic:.3f}, p = {welch.pvalue:.4f}")
-
 
 if __name__ == "__main__":
     main()

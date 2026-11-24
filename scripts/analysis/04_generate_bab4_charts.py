@@ -17,7 +17,6 @@ PRETEST_CSV = ROOT / "docs" / "nilai_pretest.csv"
 IMG_DIR = ROOT / "docs" / "images"
 IMG_DIR.mkdir(parents=True, exist_ok=True)
 
-
 def generate_pretest_chart() -> Path:
     with open(PRETEST_CSV, "r", encoding="utf-8-sig") as f:
         rows = list(csv.reader(f, delimiter=";"))
@@ -90,7 +89,6 @@ def generate_pretest_chart() -> Path:
     plt.close(fig)
     return out_path
 
-
 def generate_dialog_topic_chart() -> Path:
     topics = [
         "Dasar Pengenalan AI\n(Konsep, Jenis, Cara Kerja & Literasi KKA)",
@@ -141,7 +139,6 @@ def generate_dialog_topic_chart() -> Path:
     plt.close(fig)
     return out_path
 
-
 def main() -> None:
     plt.rcParams.update({
         "font.family": "DejaVu Sans",
@@ -153,7 +150,6 @@ def main() -> None:
     print("Grafik tersimpan:")
     print(" -", p1)
     print(" -", p2)
-
 
 if __name__ == "__main__":
     main()

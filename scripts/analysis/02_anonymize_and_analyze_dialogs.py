@@ -69,7 +69,6 @@ def build_anon_map(datasets: tuple[dict, ...]) -> tuple[dict[str, str], re.Patte
     )
     return anon_map, greeting_re
 
-
 def export_anonymized(ds: dict, anon_map: dict[str, str], greeting_re: re.Pattern, out_json: Path, out_csv: Path) -> int:
     d = deepcopy(ds)
     rows = []
@@ -235,7 +234,6 @@ def main() -> None:
             f"pertanyaan_pemantik={st['has_qmark']}/{n} ({st['has_qmark']/n*100:.1f}%), "
             f"rujukan_guru={st['refusal']}/{n} ({st['refusal']/n*100:.1f}%)"
         )
-
 
 if __name__ == "__main__":
     main()
