@@ -5,6 +5,7 @@ from contextlib import nullcontext
 from datetime import datetime, timezone
 import json
 import logging
+import os
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
@@ -184,7 +185,14 @@ async def _prepare_rag_and_persona(
 
     query = retrieval_query(question, previous_user, previous_assistant)
     recent_turn = active_history[-2:] if active_history else None
-    if hasattr(assistant, 'atranslate_queries'):
+    bilingual_mode = os.getenv('RAG_BILINGUAL_TRANSLATE', 'always').strip().lower()
+    skip_translation = (
+        bilingual_mode in ('0', 'false', 'no', 'off')
+        or (bilingual_mode == 'followup_only' and not recent_turn)
+    )
+    if skip_translation:
+        search_queries = [query]
+    elif hasattr(assistant, 'atranslate_queries'):
         search_queries = await assistant.atranslate_queries(query, history=recent_turn)
     elif hasattr(assistant, 'translate_queries'):
         search_queries = await run_in_threadpool(assistant.translate_queries, query, recent_turn)

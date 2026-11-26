@@ -2,6 +2,7 @@
 
 import os
 import re
+import threading
 import time
 
 try:
@@ -104,6 +105,10 @@ def build_scope_filter(user_id=None):
         })
     return {'$or': branches}
 
+_ASTRA_COLLECTION_CACHE = {}
+_ASTRA_COLLECTION_LOCK = threading.Lock()
+
+
 def get_astra_collection():
     load_dotenv()
     endpoint = os.environ.get('ASTRA_DB_API_ENDPOINT', '').strip()
@@ -112,11 +117,25 @@ def get_astra_collection():
         raise ValueError('Isi endpoint dan token asli pada .env.')
     if DataAPIClient is None:
         raise RuntimeError('Pustaka astrapy belum terpasang.')
-    db = DataAPIClient().get_database(endpoint, token=token)
-    return db.get_collection(
-        os.getenv('ASTRA_DB_COLLECTION', 'rag_chatbot'),
-        keyspace=os.getenv('ASTRA_DB_KEYSPACE', 'rag'),
-    )
+    col_name = os.getenv('ASTRA_DB_COLLECTION', 'rag_chatbot')
+    keyspace = os.getenv('ASTRA_DB_KEYSPACE', 'rag')
+    # Reuse persistent HTTP/2 connection pool in production; skip caching when mocked in unit tests.
+    is_real_client = isinstance(DataAPIClient, type) and DataAPIClient.__module__.startswith('astrapy')
+    if not is_real_client:
+        db = DataAPIClient().get_database(endpoint, token=token)
+        return db.get_collection(col_name, keyspace=keyspace)
+
+    cache_key = (endpoint, token, col_name, keyspace)
+    cached = _ASTRA_COLLECTION_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    with _ASTRA_COLLECTION_LOCK:
+        cached = _ASTRA_COLLECTION_CACHE.get(cache_key)
+        if cached is None:
+            db = DataAPIClient().get_database(endpoint, token=token)
+            cached = db.get_collection(col_name, keyspace=keyspace)
+            _ASTRA_COLLECTION_CACHE[cache_key] = cached
+    return cached
 
 def _fetch_query_docs(collection, query, top_k, retries=2, backoff=1.5, query_filter=None):
     active_filter = query_filter if query_filter is not None else {}
