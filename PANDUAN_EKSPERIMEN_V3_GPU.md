@@ -77,11 +77,15 @@ python scripts/evaluate_assistant.py \
 
 ---
 
-## Langkah 3 — Eksperimen B: Latih & Evaluasi Dataset v3 pada `Qwen/Qwen3-4B-Instruct-2507` (~10 Menit)
+## Langkah 3 — Eksperimen B (RTX 5090): Native BF16 rsLoRA SFT + Robust DPO pada `Qwen/Qwen3-4B-Instruct-2507` (~8 Menit)
 
-Tahap ini menguji peningkatan kapasitas penalaran & kepatuhan instruksi dengan beralih ke **`Qwen/Qwen3-4B-Instruct-2507`** pada Dataset v3 yang sama.
+Tahap ini melatih **`Qwen/Qwen3-4B-Instruct-2507`** secara optimal untuk **RTX 5090 (32 GB VRAM)** tanpa kuantisasi 4-bit (`--preset rtx5090-32gb`: Native BF16 + rsLoRA + `adamw_torch_fused` + TF32 + `group_by_length` + NEFTune), lalu dilanjutkan **Tahap 2 Robust DPO** untuk menekan halusinasi, bias, dan prompt injection.
 
 ```bash
+# 0. Pasang TRL & datasets untuk DPO (tanpa menimpa torch bawaan RTX 5090) + audit dataset
+python -m pip install -r requirements-training.txt
+python scripts/audit_dataset_quality.py --strict
+
 # 1. Unduh bobot Qwen/Qwen3-4B-Instruct-2507 & simpan juga salinan model_record
 python scripts/download_model.py \
   --model Qwen/Qwen3-4B-Instruct-2507 \
@@ -89,28 +93,39 @@ python scripts/download_model.py \
   --force
 cp model_record.json model_record_qwen3_4b.json
 
-# 2. Jalankan training QLoRA Dataset v3 pada Qwen3-4B-Instruct-2507 (~6-8 menit)
+# 2. Tahap 1 — SFT Native BF16 rsLoRA pada RTX 5090 (~4-6 menit)
 python training/train_lora.py \
   --data data/lora/lora_train.jsonl \
   --val-data data/lora/lora_val.jsonl \
   --record model_record.json \
   --out adapters/qwen-kka-lora-v3-qwen3-4b \
+  --preset rtx5090-32gb \
   --epochs 4 \
   --eval-strategy epoch \
-  --early-stopping-patience 2 \
-  --precision bf16 \
-  --batch-size 4 \
-  --grad-accum 2 \
-  --lr 1e-4 \
-  --weight-decay 0.05 \
-  --max-grad-norm 1.0 \
-  --neftune-noise-alpha 5.0
+  --early-stopping-patience 2
 
-# 3. Evaluasi 40 kasus (evals/eval_cases.jsonl) dengan adaptor v3 Qwen3-4B (~4 menit)
+# 3. Tahap 2 — Robust DPO Alignment Anti-Halusinasi & Anti-Bias (~1-2 menit)
+python training/train_dpo.py \
+  --data data/lora/dpo_preferences.jsonl \
+  --record model_record.json \
+  --sft-adapter adapters/qwen-kka-lora-v3-qwen3-4b/final \
+  --out adapters/qwen-kka-lora-v4-qwen3-4b-dpo \
+  --epochs 2 \
+  --lr 5e-6 \
+  --beta 0.1 \
+  --loss-type robust \
+  --label-smoothing 0.05
+
+# 4. Evaluasi 40 kasus rubrik pedagogis + 10 kasus anti-bias & strict grounding (~4 menit)
 python scripts/evaluate_assistant.py \
-  --local-adapter adapters/qwen-kka-lora-v3-qwen3-4b/final \
+  --local-adapter adapters/qwen-kka-lora-v4-qwen3-4b-dpo/final \
   --save-report exports/eval_v3_qwen3_4b_adapter.json \
   --save-responses exports/eval_v3_qwen3_4b_responses.jsonl
+
+python scripts/evaluate_assistant.py \
+  --cases evals/eval_bias_and_grounding.jsonl \
+  --local-adapter adapters/qwen-kka-lora-v4-qwen3-4b-dpo/final \
+  --save-report exports/eval_v4_bias_grounding.json
 ```
 
 ---

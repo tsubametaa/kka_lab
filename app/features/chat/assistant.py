@@ -108,7 +108,8 @@ class LocalAssistant:
         self.tokenizer = AutoTokenizer.from_pretrained(
             record['model_id'], revision=record['revision']
         )
-        self.tokenizer.pad_token = self.tokenizer.eos_token
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
         compute_dtype, load_in_4bit = _resolve_local_load_options(torch)
         model_kwargs = {
             'revision': record['revision'],
@@ -526,7 +527,6 @@ class VLLMAssistant:
         tail = sanitizer.flush()
         if tail:
             yield tail
-
 
 def create_assistant():
     backend = os.getenv('LLM_BACKEND', 'local').strip().lower()

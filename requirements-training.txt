@@ -1,0 +1,5 @@
+# Dependensi tambahan khusus training tahap 2 (DPO Alignment dengan TRL) di Cloud GPU (RTX 5090)
+# Instal di atas requirements-core.txt tanpa menimpa PyTorch bawaan template CUDA >= 12.8:
+#   python -m pip install -r requirements-core.txt -r requirements-training.txt
+trl>=0.23.0
+datasets>=3.0.0

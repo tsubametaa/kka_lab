@@ -1,8 +1,9 @@
-"""Fine-tune Qwen2.5-3B-Instruct LoRA adapter for KKA pedagogical mentoring."""
+"""Fine-tune Qwen2.5/Qwen3 LoRA adapter for KKA pedagogical mentoring (RTX 5090 BF16 & 4-bit QLoRA)."""
 
 import argparse
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 import subprocess
@@ -18,7 +19,6 @@ from app.features.chat import make_system
 from app.features.dataset import encode_target, split_groups, validate_rows
 from app.features.language import detect_language, format_user_message
 
-
 def build_parser():
     parser = argparse.ArgumentParser(description='Train LoRA adapter KKA.')
     parser.add_argument('--data', required=True)
@@ -29,8 +29,10 @@ def build_parser():
     parser.add_argument('--allow-demo', action='store_true')
     parser.add_argument('--validate-only', action='store_true',
                         help='Validasi argumen dan dataset lalu keluar tanpa memuat GPU/model.')
-    # Default cocok untuk T4/RTX 3050; GPU Ampere+ (RTX 30xx/40xx/50xx, A100, H100) pakai --precision bf16.
+    # Default kompatibel dengan GPU VRAM terbatas; untuk RTX 5090 gunakan --preset rtx5090-32gb.
     parser.add_argument('--precision', choices=['fp16', 'bf16'], default='fp16')
+    parser.add_argument('--no-4bit', action='store_true',
+                        help='Latih dengan native BF16/FP16 LoRA tanpa kuantisasi 4-bit (otomatis di --preset rtx5090-32gb).')
     parser.add_argument('--batch-size', type=int, default=1)
     parser.add_argument('--grad-accum', type=int, default=8)
     parser.add_argument('--max-length', type=int, default=2048)
@@ -42,19 +44,29 @@ def build_parser():
     parser.add_argument('--lora-r', type=int, default=16)
     parser.add_argument('--lora-alpha', type=int, default=32)
     parser.add_argument('--lora-dropout', type=float, default=0.1)
+    parser.add_argument('--use-rslora', action='store_true',
+                        help='Aktifkan Rank-Stabilized LoRA (peft>=0.17: skala alpha/sqrt(r)) untuk stabilitas rank tinggi.')
+    parser.add_argument('--use-dora', action='store_true',
+                        help='Aktifkan Weight-Decomposed LoRA / DoRA (peft>=0.17) untuk akurasi mendekati full fine-tuning.')
     parser.add_argument('--target-modules', default='all-linear')
     parser.add_argument('--early-stopping-patience', type=int, default=3)
     parser.add_argument('--max-grad-norm', type=float, default=1.0)
     parser.add_argument('--neftune-noise-alpha', type=float, default=0.0)
+    parser.add_argument('--group-by-length', action='store_true',
+                        help='Kelompokkan panjang sekuens per batch untuk mengurangi padding dan menstabilkan gradien.')
+    parser.add_argument('--optim', default='auto',
+                        choices=['auto', 'adamw_torch_fused', 'adamw_torch', 'paged_adamw_8bit', 'adamw_bnb_8bit'],
+                        help='Optimizer Trainer (auto: adamw_torch_fused untuk native BF16, paged_adamw_8bit untuk 4-bit).')
     parser.add_argument('--empty-cache-steps', type=int, default=0)
+    parser.add_argument('--export-merged', default='',
+                        help='Opsional: path folder untuk menyimpan model BF16 hasil merge_and_unload() bagi vLLM.')
     parser.add_argument(
         '--preset',
-        choices=['rtx3050-6gb'],
+        choices=['rtx5090-32gb', 'rtx3050-6gb'],
         default=None,
-        help='Preset hyperparameter aman untuk GPU VRAM terbatas (mis. RTX 3050 6 GB).',
+        help='Preset hyperparameter optimal untuk hardware target (rtx5090-32gb atau rtx3050-6gb).',
     )
     return parser
-
 
 def parse_target_modules(raw_value: str):
     """Ubah argumen --target-modules menjadi 'all-linear' atau daftar modul proyeksi."""
@@ -65,7 +77,6 @@ def parse_target_modules(raw_value: str):
     if not modules:
         raise ValueError('--target-modules tidak boleh kosong.')
     return modules
-
 
 def install_vram_optimizations(model, compute_dtype, torch):
     """Hemat >2 GB VRAM pada GPU 6 GB dengan menjaga matriks embedding 2D tetap 16-bit
@@ -153,7 +164,7 @@ def install_vram_optimizations(model, compute_dtype, torch):
 
 
 def apply_preset(args):
-    """Validasi argumen dasar dan terapkan batas VRAM aman jika user memilih preset hardware."""
+    """Validasi argumen dasar dan terapkan konfigurasi optimal untuk hardware target."""
     if args.max_grad_norm < 0:
         raise ValueError('--max-grad-norm harus >= 0.')
     if args.neftune_noise_alpha < 0:
@@ -161,9 +172,26 @@ def apply_preset(args):
     if args.empty_cache_steps < 0:
         raise ValueError('--empty-cache-steps harus >= 0.')
     parse_target_modules(args.target_modules)
-    if args.preset == 'rtx3050-6gb':
+    if args.preset == 'rtx5090-32gb':
+        args.precision = 'bf16'
+        args.no_4bit = True
+        args.batch_size = 4 if args.batch_size == 1 else args.batch_size
+        args.grad_accum = 2 if args.grad_accum == 8 else args.grad_accum
+        args.max_length = max(args.max_length, 2048)
+        args.epochs = 4 if args.epochs == 6 else args.epochs
+        args.eval_strategy = 'epoch'
+        args.early_stopping_patience = min(args.early_stopping_patience, 2)
+        args.lora_dropout = min(args.lora_dropout, 0.05)
+        args.use_rslora = True
+        args.group_by_length = True
+        if args.neftune_noise_alpha == 0:
+            args.neftune_noise_alpha = 5.0
+        if args.optim == 'auto':
+            args.optim = 'adamw_torch_fused'
+    elif args.preset == 'rtx3050-6gb':
         if args.precision not in ('fp16', 'bf16'):
             args.precision = 'fp16'
+        args.no_4bit = False
         args.batch_size = 1
         args.grad_accum = max(args.grad_accum, 8)
         args.max_length = min(args.max_length, 1536)
@@ -172,6 +200,16 @@ def apply_preset(args):
         if args.empty_cache_steps == 0:
             args.empty_cache_steps = 4
     return args
+
+
+def resolve_optimizer(args, load_in_4bit: bool) -> str:
+    """Pilih optimizer terbaik sesuai mode presisi (native BF16 vs 4-bit QLoRA)."""
+    if args.optim != 'auto':
+        return args.optim
+    if not load_in_4bit:
+        return 'adamw_torch_fused'
+    return 'adamw_bnb_8bit' if os.getenv('HAISHARE_PROXY_MODE') == '1' else 'paged_adamw_8bit'
+
 
 def load_and_validate_splits(args):
     if args.batch_size < 1 or args.grad_accum < 1:
@@ -202,9 +240,11 @@ def load_and_validate_splits(args):
     return raw, val_sha, train_rows, val_rows
 
 
-def require_training_dependencies():
+def require_training_dependencies(*, load_in_4bit: bool = True):
     """Pastikan pustaka training GPU tersedia sebelum memuat model."""
-    required = ('torch', 'transformers', 'peft', 'accelerate', 'bitsandbytes')
+    required = ['torch', 'transformers', 'peft', 'accelerate']
+    if load_in_4bit:
+        required.append('bitsandbytes')
     missing = [pkg for pkg in required if importlib.util.find_spec(pkg) is None]
     if missing:
         raise RuntimeError(
@@ -245,22 +285,25 @@ def require_training_dependencies():
         'prepare_model_for_kbit_training': prepare_model_for_kbit_training,
     }
 
-
 def main(argv=None):
     args = apply_preset(build_parser().parse_args(argv))
     raw, val_sha, train_rows, val_rows = load_and_validate_splits(args)
     record = load_record(args.record)
+    load_in_4bit = not args.no_4bit
+    optim_name = resolve_optimizer(args, load_in_4bit)
 
     if args.validate_only:
         print(
             f'Validasi OK: train={len(train_rows)} baris, val={len(val_rows)} baris, '
             f'model={record.get("model_id")}, precision={args.precision}, '
+            f'load_in_4bit={load_in_4bit}, optim={optim_name}, '
             f'max_length={args.max_length}, lora_r={args.lora_r}, lora_alpha={args.lora_alpha}, '
-            f'batch={args.batch_size}x{args.grad_accum}'
+            f'rslora={args.use_rslora}, dora={args.use_dora}, '
+            f'neftune={args.neftune_noise_alpha}, batch={args.batch_size}x{args.grad_accum}'
         )
         return
 
-    deps = require_training_dependencies()
+    deps = require_training_dependencies(load_in_4bit=load_in_4bit)
     torch = deps['torch']
     if not torch.cuda.is_available():
         raise RuntimeError(
@@ -272,6 +315,9 @@ def main(argv=None):
     if use_bf16 and not torch.cuda.is_bf16_supported():
         raise RuntimeError('GPU ini tidak mendukung bf16. Jalankan ulang dengan --precision fp16.')
     compute_dtype = torch.bfloat16 if use_bf16 else torch.float16
+    if use_bf16:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
 
     deps['set_seed'](42)
     out = Path(args.out)
@@ -280,7 +326,9 @@ def main(argv=None):
     tokenizer = deps['AutoTokenizer'].from_pretrained(
         record['model_id'], revision=record['revision']
     )
-    tokenizer.pad_token = tokenizer.eos_token
+    # Pertahankan pad_token bawaan Qwen (<|endoftext|>) agar tetap terpisah dari eos_token (<|im_end|>).
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = 'right'
 
     Dataset = deps['Dataset']
@@ -321,21 +369,30 @@ def main(argv=None):
         return batch
 
     train_data, val_data = Dialogues(train_rows), Dialogues(val_rows)
-    quant = deps['BitsAndBytesConfig'](
-        load_in_4bit=True,
-        bnb_4bit_quant_type='nf4',
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_compute_dtype=compute_dtype,
-    )
-    model = deps['AutoModelForCausalLM'].from_pretrained(
-        record['model_id'],
-        revision=record['revision'],
-        quantization_config=quant,
-        device_map={'': 0},
-        dtype=compute_dtype,
-        attn_implementation='sdpa',
-    )
-    model = deps['prepare_model_for_kbit_training'](model)
+    model_kwargs = {
+        'revision': record['revision'],
+        'device_map': {'': 0},
+        'dtype': compute_dtype,
+        'attn_implementation': 'sdpa',
+    }
+    if load_in_4bit:
+        model_kwargs['quantization_config'] = deps['BitsAndBytesConfig'](
+            load_in_4bit=True,
+            bnb_4bit_quant_type='nf4',
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=compute_dtype,
+        )
+    model = deps['AutoModelForCausalLM'].from_pretrained(record['model_id'], **model_kwargs)
+    if load_in_4bit:
+        model = deps['prepare_model_for_kbit_training'](
+            model,
+            use_gradient_checkpointing=True,
+            gradient_checkpointing_kwargs={'use_reentrant': False},
+        )
+    else:
+        model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={'use_reentrant': False})
+        if hasattr(model, 'enable_input_require_grads'):
+            model.enable_input_require_grads()
     model.config.use_cache = False
 
     target_modules = parse_target_modules(args.target_modules)
@@ -345,10 +402,13 @@ def main(argv=None):
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
         target_modules=target_modules,
+        use_rslora=args.use_rslora,
+        use_dora=args.use_dora,
         bias='none',
     )
     model = deps['get_peft_model'](model, config)
-    install_vram_optimizations(model, compute_dtype, torch)
+    if load_in_4bit and not args.use_dora:
+        install_vram_optimizations(model, compute_dtype, torch)
     model.print_trainable_parameters()
 
     eval_kwargs = (
@@ -365,7 +425,7 @@ def main(argv=None):
         output_dir=str(out / 'checkpoints'),
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
-        per_device_eval_batch_size=1,
+        per_device_eval_batch_size=2 if not load_in_4bit else 1,
         gradient_accumulation_steps=args.grad_accum,
         prediction_loss_only=True,
         eval_accumulation_steps=1,
@@ -376,13 +436,11 @@ def main(argv=None):
         lr_scheduler_type='cosine',
         fp16=not use_bf16,
         bf16=use_bf16,
+        tf32=use_bf16,
+        group_by_length=args.group_by_length,
         gradient_checkpointing=True,
-        gradient_checkpointing_kwargs={'use_reentrant': True},
-        optim=(
-            'adamw_bnb_8bit'
-            if os.getenv('HAISHARE_PROXY_MODE') == '1'
-            else 'paged_adamw_8bit'
-        ),
+        gradient_checkpointing_kwargs={'use_reentrant': False},
+        optim=optim_name,
         logging_steps=5,
         eval_strategy=args.eval_strategy,
         save_strategy=args.eval_strategy,
@@ -401,6 +459,11 @@ def main(argv=None):
 
     manifest = {
         'model': record,
+        'preset': args.preset,
+        'load_in_4bit': load_in_4bit,
+        'optim': optim_name,
+        'pad_token': tokenizer.pad_token,
+        'eos_token': tokenizer.eos_token,
         'data_sha256': hashlib.sha256(raw).hexdigest(),
         'val_data_sha256': val_sha,
         'train_rows': len(train_rows),
@@ -414,6 +477,8 @@ def main(argv=None):
             'concrete_smk_sma_case_simulation',
             'topic_shift_clean_focus',
             'critical_thinking_prompt',
+            'strict_context_grounding',
+            'unbiased_inclusive_language',
         ],
         'max_length': args.max_length,
         'lora': config.to_dict(),
@@ -439,14 +504,18 @@ def main(argv=None):
             )
         )
 
-    trainer = deps['Trainer'](
-        model=model,
-        args=settings,
-        train_dataset=train_data,
-        eval_dataset=val_data,
-        data_collator=collate,
-        callbacks=callbacks,
-    )
+    trainer_kwargs = {
+        'model': model,
+        'args': settings,
+        'train_dataset': train_data,
+        'eval_dataset': val_data,
+        'data_collator': collate,
+        'callbacks': callbacks,
+    }
+    if 'processing_class' in inspect.signature(deps['Trainer'].__init__).parameters:
+        trainer_kwargs['processing_class'] = tokenizer
+
+    trainer = deps['Trainer'](**trainer_kwargs)
     trainer.train(resume_from_checkpoint=args.resume or None)
     metrics = trainer.evaluate()
 
@@ -457,8 +526,17 @@ def main(argv=None):
     (out / 'evaluation.json').write_text(json.dumps(metrics, indent=2), encoding='utf-8')
     trainer.state.save_to_json(str(out / 'trainer_state.json'))
     print('Adaptor tersimpan:', final)
-    print('Nilai validation loss bukan bukti kenaikan pemahaman siswa.')
 
+    if args.export_merged:
+        merged_dir = Path(args.export_merged)
+        merged_dir.mkdir(parents=True, exist_ok=True)
+        merged_model = model.merge_and_unload()
+        merged_model.save_pretrained(merged_dir, safe_serialization=True)
+        tokenizer.save_pretrained(merged_dir)
+        (merged_dir / 'model_record.json').write_text(json.dumps(record, indent=2), encoding='utf-8')
+        print('Model merged BF16 tersimpan (siap untuk vLLM):', merged_dir)
+
+    print('Nilai validation loss bukan bukti kenaikan pemahaman siswa.')
 
 if __name__ == '__main__':
     try:

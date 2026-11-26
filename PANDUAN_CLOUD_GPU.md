@@ -51,8 +51,8 @@ cd ~/kka_lab   # sesuaikan jika path berbeda
 # 2. Cek GPU & versi CUDA PyTorch (pastikan RTX 5090 terbaca dan CUDA >= 12.8)
 python -c "import torch; print(torch.cuda.get_device_name(0), '| Torch:', torch.__version__, '| CUDA:', torch.version.cuda)"
 
-# 3. Pasang pustaka inti, pustaka OCR, dan vLLM (tanpa menimpa torch bawaan)
-python -m pip install -r requirements-core.txt -r requirements-ocr.txt vllm
+# 3. Pasang pustaka inti, pustaka training DPO (TRL), pustaka OCR, dan vLLM (tanpa menimpa torch bawaan)
+python -m pip install -r requirements-core.txt -r requirements-training.txt -r requirements-ocr.txt vllm
 
 # 4. Salin template .env lalu isi kredensial
 cp .env.example .env
@@ -67,8 +67,8 @@ ASTRA_DB_APPLICATION_TOKEN=AstraCS:xxxxxxxx
 ASTRA_DB_KEYSPACE=rag
 ASTRA_DB_COLLECTION=rag_chatbot
 
-MODEL_ID=Qwen/Qwen2.5-3B-Instruct
-# Isi baris di bawah JIKA Anda sudah punya folder hasil training LoRA:
+MODEL_ID=Qwen/Qwen3-4B-Instruct-2507
+# Isi baris di bawah JIKA Anda sudah punya folder hasil training LoRA / DPO:
 MODEL_ADAPTER=
 
 # Konfigurasi Baidu Unlimited-OCR (jalan lokal di port 8001)
@@ -80,16 +80,16 @@ OCR_BASE_URL=http://127.0.0.1:8001/v1
 AI_INTERNAL_SECRET=isi-kunci-rahasia-internal-anda
 RAG_ADMIN_SECRET=isi-kunci-khusus-guru-admin
 
-# Auto-learn materi KKA baru dari diskusi ke RAG (ubah ke false saat riset eksperimen terkontrol)
-RAG_AUTO_LEARN_ENABLED=true
+# Auto-learn WAJIB false secara default agar jawaban model kecil tidak meracuni RAG global tanpa kurasi guru
+RAG_AUTO_LEARN_ENABLED=false
 RAG_AUTO_LEARN_MAX_SIMILARITY=0.82
 ```
 
 Setelah `.env` tersimpan, unduh bobot kedua model ke disk instance (cukup 1 kali):
 
 ```bash
-# 5. Unduh model chat Qwen2.5-3B (~6 GB) -> menghasilkan model_record.json
-python scripts/download_model.py
+# 5. Unduh model chat Qwen3-4B-Instruct-2507 (~8 GB) -> menghasilkan model_record.json
+python scripts/download_model.py --model Qwen/Qwen3-4B-Instruct-2507 --record model_record.json --force
 
 # 6. Unduh model Baidu Unlimited-OCR (~7 GB, tidak perlu git clone repo Baidu)
 python scripts/download_ocr_model.py
@@ -99,43 +99,17 @@ python scripts/download_ocr_model.py
 
 ---
 
-## 4. Jika Mau Melatih / Fine-Tuning LoRA Dataset v3 Dulu
+## 4. Pipeline Training 2-Tahap Khusus RTX 5090 (Native BF16 rsLoRA + Robust DPO)
 
-Jika Anda belum memiliki adaptor LoRA v3 atau ingin melatih ulang serta membandingkan **Qwen2.5-3B-Instruct** vs **Qwen3-4B-Instruct-2507**:
+Karena **RTX 5090 memiliki 32 GB VRAM**, training tidak lagi memakai 4-bit QLoRA yang berbeda presisi dengan inferensi BF16. Gunakan preset `--preset rtx5090-32gb` (**Native BF16 LoRA + rsLoRA + `adamw_torch_fused` + TF32 + `group_by_length` + NEFTune**), lalu lanjutkan ke **Tahap 2 Robust DPO** (`training/train_dpo.py`) untuk menekan halusinasi, bias, dan prompt injection:
 
-1. Pastikan **Dataset v3** (`data/lora/lora_train.jsonl` **760 baris**, `data/lora/lora_val.jsonl` **172 baris**, `data/lora/lora_test.jsonl` **162 baris**) sudah tersedia dan tervalidasi:
+1. **Audit Dataset SFT & DPO Sebelum Training (Cek Kebocoran, Bias, & Konflik Istilah):**
    ```bash
+   python scripts/audit_dataset_quality.py --strict
    python scripts/evaluate_assistant.py --check-dataset
+   python training/train_dpo.py --validate-only --out adapters/tmp-check
    ```
-2. **Tahap A — Latih & Evaluasi Dataset v3 pada `Qwen/Qwen2.5-3B-Instruct` (~5–8 menit di Cloud GPU):**
-
-   ```bash
-   python scripts/download_model.py --model Qwen/Qwen2.5-3B-Instruct --record model_record.json --force
-
-   python training/train_lora.py \
-     --data data/lora/lora_train.jsonl \
-     --val-data data/lora/lora_val.jsonl \
-     --record model_record.json \
-     --out adapters/qwen-kka-lora-v3-qwen25 \
-     --epochs 4 \
-     --eval-strategy epoch \
-     --early-stopping-patience 2 \
-     --precision bf16 \
-     --batch-size 4 \
-     --grad-accum 2 \
-     --lr 1e-4 \
-     --weight-decay 0.05 \
-     --max-grad-norm 1.0 \
-     --neftune-noise-alpha 5.0
-
-   python scripts/evaluate_assistant.py \
-     --local-adapter adapters/qwen-kka-lora-v3-qwen25/final \
-     --save-report exports/eval_v3_qwen25_adapter.json \
-     --save-responses exports/eval_v3_qwen25_responses.jsonl
-   ```
-
-3. **Tahap B — Latih & Evaluasi Dataset v3 pada `Qwen/Qwen3-4B-Instruct-2507` (~7–10 menit di Cloud GPU):**
-
+2. **Tahap 1 — SFT Native BF16 rsLoRA pada `Qwen/Qwen3-4B-Instruct-2507` (~4–6 menit di RTX 5090):**
    ```bash
    python scripts/download_model.py --model Qwen/Qwen3-4B-Instruct-2507 --record model_record.json --force
 
@@ -143,53 +117,55 @@ Jika Anda belum memiliki adaptor LoRA v3 atau ingin melatih ulang serta membandi
      --data data/lora/lora_train.jsonl \
      --val-data data/lora/lora_val.jsonl \
      --record model_record.json \
-     --out adapters/qwen-kka-lora-v3-qwen3-4b \
+     --out adapters/qwen-kka-lora-v4-qwen3-4b-sft \
+     --preset rtx5090-32gb \
      --epochs 4 \
      --eval-strategy epoch \
-     --early-stopping-patience 2 \
-     --precision bf16 \
-     --batch-size 4 \
-     --grad-accum 2 \
-     --lr 1e-4 \
-     --weight-decay 0.05 \
-     --max-grad-norm 1.0 \
-     --neftune-noise-alpha 5.0
+     --early-stopping-patience 2
+   ```
+   _(Preset `rtx5090-32gb` otomatis menyetel `--no-4bit --precision bf16 --use-rslora --group-by-length --optim adamw_torch_fused --neftune-noise-alpha 5.0 --batch-size 4 --grad-accum 2`, menjaga `pad_token` asli Qwen `<|endoftext|>` terpisah dari `<|im_end|>`, dan mengaktifkan TF32.)_
+3. **Tahap 2 — Alignment Anti-Halusinasi & Anti-Bias dengan Robust DPO (~1–2 menit di RTX 5090):**
+   ```bash
+   python training/train_dpo.py \
+     --data data/lora/dpo_preferences.jsonl \
+     --record model_record.json \
+     --sft-adapter adapters/qwen-kka-lora-v4-qwen3-4b-sft/final \
+     --out adapters/qwen-kka-lora-v4-qwen3-4b-dpo \
+     --epochs 2 \
+     --lr 5e-6 \
+     --beta 0.1 \
+     --loss-type robust \
+     --label-smoothing 0.05
+   ```
+   _(Menghasilkan 1 adaptor drop-in `adapters/qwen-kka-lora-v4-qwen3-4b-dpo/final` yang langsung kompatibel dengan `MODEL_ADAPTER`. Tambahkan `--export-merged exports/qwen3-4b-kka-merged-bf16` bila ingin menyajikan model merged BF16 langsung di vLLM.)_
+4. **Evaluasi Ganda (40 Kasus Rubrik Pedagogis + 10 Kasus Anti-Bias & Strict Grounding):**
+   ```bash
+   python scripts/evaluate_assistant.py \
+     --local-adapter adapters/qwen-kka-lora-v4-qwen3-4b-dpo/final \
+     --save-report exports/eval_v4_qwen3_4b_dpo.json \
+     --save-responses exports/eval_v4_qwen3_4b_dpo_responses.jsonl
 
    python scripts/evaluate_assistant.py \
-     --local-adapter adapters/qwen-kka-lora-v3-qwen3-4b/final \
-     --save-report exports/eval_v3_qwen3_4b_adapter.json \
-     --save-responses exports/eval_v3_qwen3_4b_responses.jsonl
+     --cases evals/eval_bias_and_grounding.jsonl \
+     --local-adapter adapters/qwen-kka-lora-v4-qwen3-4b-dpo/final \
+     --save-report exports/eval_v4_bias_grounding.json
    ```
-
-4. Untuk **GPU lokal VRAM terbatas seperti RTX 3050 6 GB** (4-bit QLoRA dengan pengaman anti-OOM otomatis):
-   ```bash
-   python training/train_lora.py \
-     --data data/lora/lora_train.jsonl \
-     --val-data data/lora/lora_val.jsonl \
-     --record model_record.json \
-     --out adapters/qwen-kka-lora-v3 \
-     --preset rtx3050-6gb \
-     --precision bf16 \
-     --epochs 3 \
-     --eval-strategy epoch \
-     --early-stopping-patience 1 \
-     --neftune-noise-alpha 5.0
-   ```
-   _(Preset `rtx3050-6gb` otomatis menyetel `--batch-size 1 --grad-accum 8 --max-length 1536 --lora-r 8 --lora-alpha 16 --empty-cache-steps 4`, `prediction_loss_only=True`, `eval_accumulation_steps=1`, `gradient_checkpointing=True`, dan `install_vram_optimizations` agar aman di 6 GB VRAM.)_
-5. Setelah selesai, arahkan `.env` ke adaptor terbaik hasil perbandingan (`adapters/qwen-kka-lora-v3-qwen25/final` atau `adapters/qwen-kka-lora-v3-qwen3-4b/final`):
+5. Setelah lolos evaluasi, arahkan `.env` ke adaptor final DPO:
    ```env
-   MODEL_ADAPTER=adapters/qwen-kka-lora-v3-qwen3-4b/final
+   MODEL_ID=Qwen/Qwen3-4B-Instruct-2507
+   MODEL_ADAPTER=adapters/qwen-kka-lora-v4-qwen3-4b-dpo/final
    ```
 6. **WAJIB BACKUP:** Kompres dan unduh hasil adaptor serta laporan evaluasi di folder `exports/` ke laptop Anda:
    ```bash
-   zip -r exports/hasil_training_v3_bundle.zip \
+   zip -r exports/hasil_training_v4_rtx5090_bundle.zip \
      model_record.json \
-     adapters/qwen-kka-lora-v3-qwen25 \
-     adapters/qwen-kka-lora-v3-qwen3-4b \
+     adapters/qwen-kka-lora-v4-qwen3-4b-sft/evaluation.json \
+     adapters/qwen-kka-lora-v4-qwen3-4b-sft/run_manifest.json \
+     adapters/qwen-kka-lora-v4-qwen3-4b-dpo \
      exports/eval_*.json \
      exports/eval_*.jsonl
    ```
-   Klik kanan file `exports/hasil_training_v3_bundle.zip` di JupyterLab $\rightarrow$ **Download**. Jika masa sewa habis, Anda **tidak perlu training ulang** — cukup ekstrak kembali ke laptop atau server baru.
+   Klik kanan file `exports/hasil_training_v4_rtx5090_bundle.zip` di JupyterLab $\rightarrow$ **Download**. Jika masa sewa habis, Anda **tidak perlu training ulang** — cukup ekstrak kembali ke server baru.
 
 ---
 
